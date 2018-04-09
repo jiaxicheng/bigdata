@@ -40,3 +40,15 @@ export SPARK_DIST_CLASSPATH=$($HADOOP_HOME/bin/hadoop classpath)
   + Thrift Server
 
 Note: make sure to use the spark version of beeline ($SPARK_HOME/bin/beeline).
+
+### GlusterFS cluster ###
+These are on the separate nodes, and managing details is not covered here.
++ GlusterFS provided distributed storage system that support also replication and high availabilities.
+  Managing a GlusterFS cluster is 10 times simplier than managing a HDFS cluster.
++ To setup Gluster node on Centos 7:
+  1. install softwares: 
+  ```
+    yum install centos-release-gluster38
+    yum install glusterfs gluster-cli glusterfs-libs glusterfs-server
+  ```
+  2. firewall: just enable the service=glusterfs
