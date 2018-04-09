@@ -14,7 +14,7 @@ Metastore:
  - hive -> /data/hdfs/apache-hive-2.3.3-bin
  - hadoop -> /data/hdfs/hadoop-2.9.0   
 
-Hive2 Server:
+HiveServer2:
  - must have metastore available
  - hive -> /data/hdfs/apache-hive-2.3.3-bin
  - hadoop -> /data/hdfs/hadoop-2.9.0
@@ -23,7 +23,7 @@ Apache Hive has strong tie with Hadoop. running any of its command without Hadoo
 ```
 Cannot find hadoop installation: $HADOOP_HOME or $HADOOP_PREFIX must be set or hadoop must be in the path
 ```
-It's likely to run Hive well without running HDFS/YARN, but a hadoop installation MUST be accessible at a non-empty $HADOOP_HOME folder.
+It's likely to run Hive well without running HDFS/YARN, but a hadoop installation MUST be accessible at a non-empty `$HADOOP_HOME` folder.
 
 ### Spark Cluster for Hive on spark ###
 + Spark must be compiled from the source without the flag: `-Phive`.
