@@ -1,6 +1,7 @@
 #!/bin/bash
 ##########################################################
 # A bash script to manage zookeeper cluster              #
+# by Xicheng Jia Spring 2017                             #
 # the script relys on the zoo.cfg file to find all nodes #
 # and then run the ssh remote command accordingly        #
 # copy this script to $ZK_HOME/bin folder and then run   #
