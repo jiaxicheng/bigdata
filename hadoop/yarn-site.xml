@@ -1,0 +1,154 @@
+<?xml version="1.0"?>
+<!--
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License. See accompanying LICENSE file.
+-->
+<configuration>
+
+<!-- Site specific YARN configuration properties -->
+  <property>
+    <name>yarn.nodemanager.aux-services</name>
+    <value>mapreduce_shuffle</value> 
+  </property>
+
+  <property>
+    <name>yarn.nodemanager.address</name>
+    <value>0.0.0.0:8066</value> 
+  </property>
+
+<!-- memory set to make it work on limited resource -->
+<property>
+  <name>yarn.scheduler.minimum-allocation-mb</name>
+  <value>128</value>
+  <description>Minimum limit of memory to allocate to each container request at the Resource Manager. default is 1024MB.  </description>
+</property>
+
+<!-- below set up without HA
+  <property>
+    <name>yarn.resourcemanager.hostname</name>
+    <value>sgrove</value>
+  </property>
+
+  <property>
+    <name>yarn.resourcemanager.address</name>
+    <value>${yarn.resourcemanager.hostname}:8032</value>
+  </property>
+
+  <property>
+   <name>yarn.resourcemanager.resource-tracker.address</name>
+   <value>${yarn.resourcemanager.hostname}:8031</value>
+  </property>
+
+  <property>
+   <name>yarn.resourcemanager.nodes.exclude-path</name>
+   <value>/data/hdfs/hadoop-latest/etc/hadoop/dfs.exclude</value>
+  </property>
+-->
+
+<!-- below for some issues with Spark -->
+<property>
+    <name>yarn.nodemanager.pmem-check-enabled</name>
+    <value>false</value>
+</property>
+
+<property>
+    <name>yarn.nodemanager.vmem-check-enabled</name>
+    <value>false</value>
+</property>
+
+<!-- save logs into HDFS, not very useful
+<property>
+    <name>yarn.log-aggregation-enable</name>
+    <value>true</value>
+</property>
+-->
+
+<!-- for Tex UI -->
+<property>
+  <description>Indicate to clients whether Timeline service is enabled or not.
+  If enabled, the TimelineClient library used by end-users will post entities
+  and events to the Timeline server.</description>
+  <name>yarn.timeline-service.enabled</name>
+  <value>true</value>
+</property>
+
+<property>
+  <description>The hostname of the Timeline service web application.</description>
+  <name>yarn.timeline-service.hostname</name>
+  <value>sgrove</value>
+</property>
+
+<property>
+  <description>The hostname of the Timeline service web application.</description>
+  <name>yarn.timeline-service.webapp.address</name>
+  <value>sgrove:8188</value>
+</property>
+
+<property>
+  <description>Enables cross-origin support (CORS) for web services where
+  cross-origin web response headers are needed. For example, javascript making
+  a web services request to the timeline server.</description>
+  <name>yarn.timeline-service.http-cross-origin.enabled</name>
+  <value>true</value>
+</property>
+
+<property>
+  <description>Publish YARN information to Timeline Server</description>
+  <name>yarn.resourcemanager.system-metrics-publisher.enabled</name>
+  <value>true</value>
+</property>
+
+<!-- YARN HA configuration 
+     https://hadoop.apache.org/docs/stable2/hadoop-yarn/hadoop-yarn-site/ResourceManagerHA.html
+-->
+<property>
+  <name>yarn.resourcemanager.ha.enabled</name>
+  <value>true</value>
+</property>
+<property>
+  <name>yarn.resourcemanager.cluster-id</name>
+  <value>ycluster</value>
+</property>
+<property>
+  <name>yarn.resourcemanager.ha.rm-ids</name>
+  <value>rm1,rm2</value>
+</property>
+<property>
+  <name>yarn.resourcemanager.hostname.rm1</name>
+  <value>sgrove</value>
+</property>
+<property>
+  <name>yarn.resourcemanager.hostname.rm2</name>
+  <value>lexington</value>
+</property>
+<property>
+  <name>yarn.resourcemanager.webapp.address.rm1</name>
+  <value>sgrove:8088</value>
+</property>
+<property>
+  <name>yarn.resourcemanager.webapp.address.rm2</name>
+  <value>lexington:8088</value>
+</property>
+<property>
+  <name>yarn.resourcemanager.zk-address</name>
+  <value>borders:2181,lexington:2181,madison:2181</value>
+</property>
+
+<!-- for spark_on_hive 
+     https://cwiki.apache.org/confluence/display/Hive/Hive+on+Spark%3A+Getting+Started
+     -->
+<property>
+  <name>yarn.resourcemanager.scheduler.class</name>
+  <value>org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair.FairScheduler</value>
+</property>
+
+<!--</configuration>-->
