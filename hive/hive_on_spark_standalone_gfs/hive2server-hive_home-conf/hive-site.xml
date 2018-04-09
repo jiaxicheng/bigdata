@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<configuration>
+
+  <!-- set hive to run on local 
+       glusterfs volume is mounted on all related server at file:///gfs/spark
+       -->
+  <property> 
+    <name>hive.metastore.warehouse.dir</name> 
+    <value>/gfs/spark/warehouse</value>
+  </property>
+  <property> 
+    <name>fs.default.name</name> 
+    <value>file:///gfs/spark</value> 
+  </property> 
+
+  <!-- set for hive server2 -->
+  <property>
+    <name>hive.server2.thrift.bind.host</name>
+    <value>192.168.1.23</value>
+    <description>Bind host on which to run the HiveServer2 Thrift service.</description>
+  </property>
+  <property>
+    <name>hive.server2.thrift.port</name>
+    <value>20000</value>
+    <description>Port number of HiveServer2 Thrift interface when hive.server2.transport.mode is 'binary'.</description>
+  </property>
+
+  <property>
+    <name>hive.metastore.uris</name>
+    <value>thrift://192.168.1.23:9083</value>
+    <description>IP address (or fully-qualified domain name) and port of the metastore host</description>
+  </property>
+
+  <property>
+    <name>hive.server2.enable.doAs</name>
+    <value>false</value>
+  </property>
+
+  <property>
+    <name>hive.metastore.schema.verification</name> 
+    <value>false</value> 
+  </property> 
+
+  <!-- for hive on spark -->
+  <property>
+    <name>hive.execution.engine</name>
+    <value>spark</value>
+  </property>
+
+  <property>
+    <name>spark.master</name>
+    <value>spark://lexington:7077</value>
+  </property>
+
+  <property>
+    <name>spark.submit.deployMode</name>
+    <value>client</value>
+  </property>
+
+</configuration>
