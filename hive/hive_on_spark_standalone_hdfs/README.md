@@ -22,7 +22,7 @@ apache-hive installed on all worker nodes which is not flexible.
   </property>
 ```
 
-=== Softwares required: ===
+### Softwares required:###
 * Spark Cluster nodes (both Manager and Workers):
   - spark-latest -> /data/hdfs/spark-2.2.1.no_hive (Worker)
 
@@ -42,13 +42,13 @@ Error: Error while compiling statement: FAILED: SemanticException Failed to
 get a spark session: org.apache.hadoop.hive.ql.metadata.HiveException: Failed
 to create spark client. (state=42000,code=40000)
 ```
-Solution: Likely the compatibility issue between spark versions. When compiling spark, do NOT use `-Phive` 
+*Solution*: Likely the compatibility issue between spark versions. When compiling spark, do NOT use `-Phive` 
 
 ---
 ```
 ERROR: java.nio.file.NoSuchFileException: /data/hdfs/apache-hive-2.3.3-bin/lib/hive-exec-2.3.3.jar
 ```
-Solution: set `spark.submit.deployMode = client`
+*Solution*: set `spark.submit.deployMode = client`
 Thus all drivers had been compiled on the client-end before submitting to the spark cluster. no need 
 to find the resources (i.e. jar files) on the individual worker in the cluster-mode
 
