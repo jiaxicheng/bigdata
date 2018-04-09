@@ -9,7 +9,7 @@
 2. Hive Metastore server must have hadoop available on the same server(no need to run HDFS or YARN)
 
 ------
-### onfigurations: ###
+### Configurations: ###
 1. For the Spark Cluster:
 All servers must have the following two files under $SPARK_HOME/conf/
 - spark-default.conf
