@@ -22,8 +22,8 @@ app-20180408120628-0002
     ├── hive-exec-2.3.3.jar
     ├── stderr
     └── stdout
-```
-ERROR: 
+
+ERROR (snippet from stderr): 
 18/04/08 12:07:01 INFO broadcast.TorrentBroadcast: Started reading broadcast variable 0
 18/04/08 12:07:01 INFO client.TransportClientFactory: Successfully created connection to /192.168.1.23:32025 after 2 ms (0 ms spent in bootstraps)
 18/04/08 12:07:01 INFO memory.MemoryStore: Block broadcast_0_piece0 stored as bytes in memory (estimated size 76.6 KB, free 413.5 MB)
@@ -58,6 +58,7 @@ java.lang.NullPointerException
 18/04/08 12:07:03 INFO executor.Executor: Running task 1.3 in stage 0.0 (TID 5)
 18/04/08 12:07:03 INFO rdd.HadoopRDD: Input split: Paths:/gfs/spark/dfs/iotop/sgrove/2017-05-12/2017-05-12.txt:0+5416727,/gfs/spark/dfs/iotop/sgrove/2017-05-13/iotop.1494662286088.txt.tmp:0+29200,/gfs/spark/dfs/iotop/sgrove/2017-05-13/2017-05-13.txt:0+2364145,/gfs/spark/dfs/iotop/sgrove/2017-06-09/2017-06-09.txt:0+1083341,/gfs/spark/dfs/iotop/sgrove/2017-06-09/iotop.1497044489945.txt.tmp:0+21499,/gfs/spark/dfs/iotop/sgrove/2017-06-09/iotop.1497041829158.txt.tmp:0+5141,/gfs/spark/dfs/iotop/sgrove/2017-06-10/iotop.1497067213527.txt.tmp:0+11759,/gfs/spark/dfs/iotop/sgrove/2017-06-10/2017-06-10.txt:0+2167156,/gfs/spark/dfs/iotop/sgrove/2017-06-13/2017-06-13.txt:0+1479708,/gfs/spark/dfs/iotop/sgrove/2017-06-14/2017-06-14.txt:0+2237847,/gfs/spark/dfs/iotop/sgrove/2017-06-15/2017-06-15.txt:0+3629484,/gfs/spark/dfs/iotop/sgrove/2017-06-16/2017-06-16.txt:0+3694560,/gfs/spark/dfs/iotop/sgrove/2017-06-17/2017-06-17.txt:0+3395576,/gfs/spark/dfs/iotop/sgrove/2017-06-18/2017-06-18.txt:0+3403274,/gfs/spark/dfs/iotop/sgrove/2017-06-19/2017-06-19.txt:0+2466310,/gfs/spark/dfs/iotop/sgrove/2017-07-05/2017-07-05.txt:0+1912777,/gfs/spark/dfs/iotop/sgrove/2017-07-06/2017-07-06.txt:0+4030449,/gfs/spark/dfs/iotop/sgrove/2017-07-07/2017-07-07.txt:0+3854325,/gfs/spark/dfs/iotop/sgrove/2017-07-08/2017-07-08.txt:0+3760136,/gfs/spark/dfs/iotop/sgrove/2017-07-09/2017-07-09.txt:0+3956763,/gfs/spark/dfs/iotop/sgrove/2017-07-10/2017-07-10.txt:0+3928105,/gfs/spark/dfs/iotop/sgrove/2017-07-11/2017-07-11.txt:0+2047956,/gfs/spark/dfs/iotop/sgrove/2017-08-08/iotop.1502208534121.txt.tmp:0+8887,/gfs/spark/dfs/iotop/sgrove/2017-08-08/2017-08-08.txt:0+2752313,/gfs/spark/dfs/iotop/sgrove/2017-08-09/iotop.1502251241791.txt.tmp:0+39329,/gfs/spark/dfs/iotop/sgrove/2017-08-09/2017-08-09.txt:0+1451686InputFormatClass: org.apache.hadoop.mapred.TextInputFormat
 
+```
 
 
 
