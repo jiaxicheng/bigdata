@@ -6,7 +6,7 @@
 * [x] [Hive on spark - Spark on Stand-alone cluster with HDFS](https://github.com/jiaxicheng/bigdata/tree/master/hive/hive_on_spark_standalone_hdfs)
 * [ ] Hive on spark - Spark on Stand-alone cluster with GlusterFS
 * [x] Spark SQL - Spark Stand-alone cluster with HDFS
-* [x] [Spark SQL - Spark Stand-alone cluster with FlusterFS](https://github.com/jiaxicheng/bigdata/tree/master/spark/spark_thrift_on_gfs)
+* [x] [Spark SQL - Spark Stand-alone cluster with GlusterFS](https://github.com/jiaxicheng/bigdata/tree/master/spark/spark_thrift_on_gfs)
 
 ## Dependencies: ##
 ### Apache Hive ###
