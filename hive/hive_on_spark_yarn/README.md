@@ -1,4 +1,4 @@
-== Hive on spark with yarn ==
+## Hive on spark with yarn ##
 
 Spark is running on top of the hadoop cluster and managed by yarn(resource/node manager)
 
@@ -20,12 +20,13 @@ Note:
 * Spark is only needed on the same server running the Apache Hive2 server
 * Spark must be compiled without -Phive
 
+---
 Note: for spark comipled with -Phadoop-provided, need to add the following environment variable in the shell:
 ```
 export SPARK_DIST_CLASSPATH=$($HADOOP_HOME/bin/hadoop classpath)
 
 ```
-
+---
 For spark_on_hive, add the following directive into $HADOOP_HOME/etc/hadoop/yarn-site.xml
 REF:[Officeal Doc](https://cwiki.apache.org/confluence/display/Hive/Hive+on+Spark%3A+Getting+Started)
 ```
