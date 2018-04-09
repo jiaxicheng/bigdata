@@ -12,17 +12,17 @@
 + hive-latest -> /data/hdfs/apache-hive-2.3.3-bin
 + hadoop-latest -> /data/hdfs/hadoop-2.9.0
 
-### Current issues: 
-
-error on executor worker node after the application was submitted:
 ---
+### Current issues: 
+error on executor worker node after the application was submitted:
+```
 [hdfs@borders work]$ tree app-20180408120628-0002
 app-20180408120628-0002
 └── 1
     ├── hive-exec-2.3.3.jar
     ├── stderr
     └── stdout
-
+```
 ERROR: 
 18/04/08 12:07:01 INFO broadcast.TorrentBroadcast: Started reading broadcast variable 0
 18/04/08 12:07:01 INFO client.TransportClientFactory: Successfully created connection to /192.168.1.23:32025 after 2 ms (0 ms spent in bootstraps)
