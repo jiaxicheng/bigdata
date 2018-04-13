@@ -49,6 +49,9 @@ to create spark client. (state=42000,code=40000)
 ERROR: java.nio.file.NoSuchFileException: /data/hdfs/apache-hive-2.3.3-bin/lib/hive-exec-2.3.3.jar
 ```
 *Solution*: set `spark.submit.deployMode = client`
-Thus all drivers had been compiled on the client-end before submitting to the spark cluster. no need 
-to find the resources (i.e. jar files) on the individual worker in the cluster-mode
 
+In such case, the remote worker will download the jar file(hive-exec-2.3.3.jar) from the Manager node
+at runtime before it starts running its main task. 
+
+On the other hand, you can also install Hive on all worker nodes, in such case using the default 
+`cluster` deployMode will be more efficient.
