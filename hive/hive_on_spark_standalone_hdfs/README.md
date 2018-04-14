@@ -9,7 +9,7 @@ under the same folder as hive-site.xml under $HIVE_CONF_DIR (i.e. $HIVE_HOME/con
   </property>
   <property>
     <name>spark.submit.deployMode</name>
-    <value>client</value>
+    <value>client</value>    
   </property>
 ```
 
