@@ -2,7 +2,8 @@
 <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
 <configuration>
 
-  <!-- for metastore -->
+  <!-- Hive metastore basic configurations
+       -->
   <property>
     <name>javax.jdo.option.ConnectionURL</name>
     <value>jdbc:mysql://127.0.0.1:3305/hive?createDatabaseIfNotExist=true</value>
@@ -29,5 +30,21 @@
     <value>9083</value>
     <description>Hive metastore listener port</description>
   </property>
+
+  <!-- Hive Metastore Kerberos Authentication 
+       -->
+  <property>
+    <name>hive.metastore.sasl.enabled</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>hive.metastore.kerberos.keytab.file</name>
+    <value>/etc/security/bigdata/hive.service.keytab</value>
+  </property>
+  <property>
+    <name>hive.metastore.kerberos.principal</name>
+    <value>hive/_HOST@JXC.COM</value>
+  </property>
+
 
 </configuration>
