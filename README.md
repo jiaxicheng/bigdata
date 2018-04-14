@@ -1,10 +1,12 @@
 
 ## Targets: ##
-* [x] Hive on mr - Apache Ignite caching + HDFS/YARN
-* [x] Hive on tez - Apache HDFS/YARN
+* [x] Hive on mr - Apache Ignite caching
+* [ ] Hive on mr with LLAP caching (TODO)
+* [x] Hive on tez
+* [ ] Hive on tez with LLAP caching (TODO)
 * [x] [Hive on spark - Spark on YARN](https://github.com/jiaxicheng/bigdata/tree/master/hive/hive_on_spark_yarn) 
 * [x] [Hive on spark - Spark on Stand-alone cluster with HDFS](https://github.com/jiaxicheng/bigdata/tree/master/hive/hive_on_spark_standalone_hdfs)
-* [ ] Hive on spark - Spark on Stand-alone cluster with GlusterFS
+* [ ] Hive on spark - Spark on Stand-alone cluster with GlusterFS (INCOMPLETED)
 * [x] Spark SQL - Spark Stand-alone cluster with HDFS
 * [x] [Spark SQL - Spark Stand-alone cluster with GlusterFS](https://github.com/jiaxicheng/bigdata/tree/master/spark/spark_thrift_on_gfs)
 
@@ -32,6 +34,8 @@ It's likely to run Hive well without running HDFS/YARN, but a hadoop installatio
 export SPARK_DIST_CLASSPATH=$($HADOOP_HOME/bin/hadoop classpath)
 
 ```
+*Note:* hive.execution.engine, spark.master, spark.submit.deployMode can be adjusted at runtime. Do check these 
+variables before running HQLs.
 
 ### Spark Cluster on its own ###
 + Spark: can download the precompiled bin-tar, so no need to have hadoop for:
