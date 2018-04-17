@@ -7,9 +7,9 @@
 
 **Issues:**
 The current configuration is working only when the Worker is on the same server as Hive Server2,
-all executors on other workers will failed with 'java.lang.NullPointerException' error. 
-It's probably the limitation when setting Hive run on local server, Will need to check more details
-when I have time later.
+all executors on other workers will fail with an error 'java.lang.NullPointerException'. 
+It's probably the limitation when setting Hive to run on local server. 
+The applications can be submitted from a remote server though.
 
 **Note:** all workers have the same `file:///gfs/spark` mount point and can access the required files with
 the proper permission bits.
