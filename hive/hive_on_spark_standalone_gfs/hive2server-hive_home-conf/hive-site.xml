@@ -14,7 +14,8 @@
     <value>file:///gfs/spark</value> 
   </property> 
 
-  <!-- set for hive server2 -->
+  <!-- Hive server2 basic configurations
+       -->
   <property>
     <name>hive.server2.thrift.bind.host</name>
     <value>192.168.1.23</value>
@@ -42,7 +43,8 @@
     <value>false</value> 
   </property> 
 
-  <!-- for hive on spark -->
+  <!-- Hive on spark 
+       -->
   <property>
     <name>hive.execution.engine</name>
     <value>spark</value>

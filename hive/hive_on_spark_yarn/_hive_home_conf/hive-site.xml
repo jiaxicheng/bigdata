@@ -2,7 +2,8 @@
 <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
 <configuration>
 
-  <!-- for Hiveserver2 server-->
+  <!-- HiveServer2 server basic configurations
+       -->
   <property>
     <name>hive.server2.thrift.bind.host</name>
     <value>192.168.1.23</value>
@@ -22,7 +23,8 @@
     <value>false</value>
   </property> 
 
-  <!-- for execution engine -->
+  <!-- Hive execution engine 
+       -->
   <property>
     <name>hive.execution.engine</name>
     <value>spark</value>
