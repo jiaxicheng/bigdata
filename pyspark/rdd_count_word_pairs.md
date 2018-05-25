@@ -157,3 +157,35 @@ rdd2.map(lambda x: ' '.join(x)) \
     .top(5, key=lambda x:x[1])
 ```
 
+### Method-3: using sc.textFile() and aggregate() function ###
+
+pyspark provides aggregate() method which can isolate the operations based on partitions.
+Thus we can define reduce() function within a partiton and between different partitions.
+We will set up an initial value of reduce result to [''], this inital x must be a list.
+The logic can be simplified as below:
+
+```
+# Within the same partitions, we know that y must not be a list
+# since x is a list, if y is not empty, then concatenate it with
+# the last element in the list x. if y is empty line, then it should be
+# add to x as a standalone element(to signal a new paragraph)
+def merge_within_partition(x, y):
+    if y:
+        x[-1] += ' ' + y
+    else: 
+        x.append('')
+    return x
+
+# merge is now between list and list
+# the last element in x to concatenate with the first element in y
+# then extend the rest of y to x
+def merge_between_partitions(x,y):
+    x[-1] += ' ' + y[0]
+    if len(y) > 1: 
+        x = x + y[1:]
+    return x
+
+rdd1 = sc.textFile("file:///home/hdfs/test/pyspark/word-count-1.txt", minPartitions=10)
+rdd1.aggregate([''], merge_within_partition, merge_between_partitions)
+
+```
