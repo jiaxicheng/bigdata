@@ -51,7 +51,7 @@ for counting.
 This is the simplest way and recommended when the file-size is manageable.
 
 
-### Method-2: using sc.textFile() ###
+### Method-2: using sc.textFile() and rdd.reduce() function ###
 
 When using sc.textFile(), the file_contents are read line-by-line, there is no way
 using map(), flatMap etc to identify the boundaries of a paragraph. reduce() and related 
@@ -157,7 +157,7 @@ rdd2.map(lambda x: ' '.join(x)) \
     .top(5, key=lambda x:x[1])
 ```
 
-### Method-3: using sc.textFile() and aggregate() function ###
+### Method-3: using sc.textFile() and rdd.aggregate() function ###
 
 pyspark provides aggregate() method which can isolate the operations based on partitions.
 Thus we can define reduce() function within a partiton and between different partitions.
@@ -189,3 +189,31 @@ rdd1 = sc.textFile("file:///home/hdfs/test/pyspark/word-count-1.txt", minPartiti
 rdd1.aggregate([''], merge_within_partition, merge_between_partitions)
 
 ```
+
+### Method-4: Using sc.textFile() and rdd.fold() function ###
+
+The difference between a fold() and reduce() is that fold() provides
+an opportunity to setup an initial values, thus in func(x, y), you dont
+need to worry about the data type of `x`, it will always be a list
+after we setup the zeroValue to ['']
+
+```
+def fold_lines_in_paragraph(x, y):
+    if y:
+        # merging from a different partition
+        if type(y) is list:
+            x[-1] += ' ' + y[0]
+            x = x + y[1:]
+        # in the same partition
+        else:
+            x[-1] += ' ' + y
+    # same partition, but y is empty line
+    else:
+        x.append('')
+    return x
+rdd1 = sc.textFile("file:///home/hdfs/test/pyspark/word-count-1.txt", minPartitions=10)
+rdd1.fold([''], fold_lines_in_paragraph)
+
+```
+
+
