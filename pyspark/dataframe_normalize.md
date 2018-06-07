@@ -3,8 +3,7 @@
 To normalize a column with values from either a Python data structure, a JSON string or any delimited strings.
 
 ```
-from pyspark SparkSession
-from pyspark.sql import functions as F
+from pyspark.sql import SparkSession, functions as F
 import json
 """ create SparkSession """
 spark = SparkSession.builder                          \
@@ -75,19 +74,70 @@ In [125]: df2.select('items', F.explode('uid').alias('id')).show()
 
 For complexed data structures, you might have to do multiple F.explode()
 by combining select() and/or withColumn()
-For example: https://stackoverflow.com/questions/50714330/spliting-a-row-to-multiple-row-pyspark
+
 
 **My experience:**
 
 + When the function returns a scalar, then use withColumn(), 
 + F.explode() returns multiple columns, thus have to use select()
 
+**Note:**
++ only one F.posexplode() can be used in the same 'select()' statement, multiple posexplode will
+  yield the following error:
 ```
-df.withColumn('base1', F.split('items_base', '~#~')) \
+AnalysisException: u'Only one generator allowed per select clause but found 2: posexplode(base1), posexplode(base3);'
+```
+
+Below example data are from the following stackoverflow link
+REF: https://stackoverflow.com/questions/50714330/spliting-a-row-to-multiple-row-pyspark
+```
+In [18]: df.select('id', 'items_base').show(truncate=0)
++---+------------------------------------------------------------------------------+
+|id |items_base                                                                    |
++---+------------------------------------------------------------------------------+
+|0  |departmentcode__50~#~p99189h8pk0__10483~#~prod_productcolor__Dustysalmon Pink |
+|1  |departmentcode__10~#~p99189h8pk0__10484~#~prod_productcolor__Dustysalmon Black|
+|2  |departmentcode__60~#~p99189h8pk0__10485~#~prod_productcolor__Dustysalmon White|
++---+------------------------------------------------------------------------------+
+
+In [19]: df.withColumn('base1', F.split('items_base', '~#~')) \
   .select('id', F.posexplode('base1')) \
   .withColumn('base2', F.split('col', '__')) \
   .select('id', 'pos', F.col('base2').getItem(0).alias('dept0'), F.col('base2').getItem(1).alias('att0')) \
   .show()
+
+""" getItem(0) can be simplified by using the array indices, the following
+modified verson yields the same results.
+"""
+
+In [20]: df.withColumn('base1', F.split('items_base', '~#~')) \
+  .select('id', F.posexplode('base1')) \
+  .withColumn('base2', F.split('col', '__')) \
+  .select('id', 'pos', F.col('base2')[0].alias('dept0'), F.col('base2')[1].alias('att0')) \
+  .show()
++---+---+-----------------+-----------------+
+| id|pos|            dept0|             att0|
++---+---+-----------------+-----------------+
+|  0|  0|   departmentcode|               50|
+|  0|  1|      p99189h8pk0|            10483|
+|  0|  2|prod_productcolor| Dustysalmon Pink|
+|  1|  0|   departmentcode|               10|
+|  1|  1|      p99189h8pk0|            10484|
+|  1|  2|prod_productcolor|Dustysalmon Black|
+|  2|  0|   departmentcode|               60|
+|  2|  1|      p99189h8pk0|            10485|
+|  2|  2|prod_productcolor|Dustysalmon White|
++---+---+-----------------+-----------------+
+
+"""To merge the results from two columns with similar string layout"""
+dfs = {}
+for item in ['items_base', 'item_target']:
+    dfs[item] = df.withColumn('base1', F.split(item, '~#~')) \
+                  .select('id', F.posexplode('base1')) \
+                  .withColumn('base2', F.split('col', '__')) \
+                  .select('id', 'pos', F.col('base2')[0].alias('dept0'), F.col('base2')[1].alias('att0'))
+
+dfs['item_target'].union(dfs['items_base']).show()
 
 ```
 Note: `pyspark.sql.functions.struct(*cols)` might be used in data structures, use the dot notation
