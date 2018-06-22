@@ -154,7 +154,7 @@ df.select(F.min(F.struct('id', 'device', 'others')).alias('m')) \
 
 ### To convert an array into string:
 
-Convert a array into string:    F.concat_ws(',', df.Group_con).alias('a_list')
+Convert a array into string:    
 ```
 +---+--------------------------------------------------------------------------+
 |id |Group_con                                                                 |
@@ -163,6 +163,17 @@ Convert a array into string:    F.concat_ws(',', df.Group_con).alias('a_list')
 |1  |[windows pc, iphone5, windows, iphone, android phone, spy camera, android]|
 |2  |[apple iphone, camera, iphone]                                            |
 +---+--------------------------------------------------------------------------+
+
+#run the following command:
+F.concat_ws(',', df.Group_con).alias('a_list')
++---+------------------------------------------------------------------+
+|id |a_list                                                            |
++---+------------------------------------------------------------------+
+|3  |cctv,mac pro,spy camera,mac                                       |
+|1  |windows pc,iphone5,windows,iphone,android phone,spy camera,android|
+|2  |apple iphone,camera,iphone                                        |
++---+------------------------------------------------------------------+
+
 ```
 
 ## JSON string: ##
