@@ -91,6 +91,70 @@ Below example to retrieve the `device`name with longest name for each grouped `i
 
 Note: windows and F.first_number() are frequently used in adding a sequence number to a groupby list.
 
+
+## Example-2: Count frequency of similar phrases
+[Spark - Group and Count By Similar Strings](https://stackoverflow.com/questions/50802444/spark-group-and-count-by-similar-strings-scala-or-pyspark)
+
+```
+source dataframe
+
+In [195]: df2.show(10, 0)
++--------------------------+
+|value                     |
++--------------------------+
+|Apple                     |
+|Banana                    |
+|Tilamook Butter           |
+|Gala Apple                |
+|Pinto Beans               |
+|Salt                      |
+|Granny Smith Apple        |
+|Generic Butter Beans Beans|
+|Butter                    |
+|Black Beans Apple         |
++--------------------------+
+
+# to count the frequency of echo word
+win = Window.partitionBy('word')
+
+# for each original phrase, find the most frequently used word, put it on the top
+# so that we can use F.row_number == 1 to retrieve it
+win1 = Window.partitionBy('value').orderBy(F.col('count').desc())
+
+# split phrase into words, count the words and then sort the result based on
+# the original phrase, pick the word which is shown most frequently in the whole
+# dataset and their counts
+df3 = df2.withColumn('word', F.explode(F.split('value', '\s+')))\
+   .withColumn('count', F.count('word').over(win)) \
+   .select('word', 'count', F.row_number().over(win1).alias('top')) \
+   .persist()
+
+total = df3.where('top==1') \
+           .dropDuplicates() \
+           .drop('top') \
+           .toPandas().set_index('word')['count'].to_dict()
+print(total)
+{u'Apple': 4, u'Banana': 1, u'Beans': 6, u'Butter': 4, u'Salt': 1}
+
+# if multiple top words happen in the same phrase, the phrases are counted multiple times
+# and thus such count should be cleared
+# below list those which matched on more than one instance
+over_counted = df3.where('(top > 1) and (count > 1)') \
+                  .select('word') \
+                  .rdd.flatMap(list) \
+                  .collect()
+print(over_counted)
+[u'Butter', u'Apple', u'Beans', u'Butter']
+
+# reduce count by one for each word shown in the list of over_counted
+for k in over_counted:
+    if k in total: total[k] -= 1
+
+# print the resultset
+print(total)
+{u'Apple': 3, u'Banana': 1, u'Beans': 5, u'Butter': 2, u'Salt': 1}
+```
+
 Reference:
 [1] [How to select the first row of each group](https://stackoverflow.com/questions/33878370/how-to-select-the-first-row-of-each-group)
 
