@@ -155,6 +155,7 @@ df.select(F.min(F.struct('id', 'device', 'others')).alias('m')) \
 ### To convert an array into string:
 
 Convert a array into string:    F.concat_ws(',', df.Group_con).alias('a_list')
+```
 +---+--------------------------------------------------------------------------+
 |id |Group_con                                                                 |
 +---+--------------------------------------------------------------------------+
@@ -162,11 +163,7 @@ Convert a array into string:    F.concat_ws(',', df.Group_con).alias('a_list')
 |1  |[windows pc, iphone5, windows, iphone, android phone, spy camera, android]|
 |2  |[apple iphone, camera, iphone]                                            |
 +---+--------------------------------------------------------------------------+
-
-
-https://stackoverflow.com/questions/50884060/get-unique-values-when-concatenating-two-columns-pyspark-data-frame/50884489?noredirect=1#comment88833157_50884489
-
-
+```
 
 ## JSON string: ##
 
