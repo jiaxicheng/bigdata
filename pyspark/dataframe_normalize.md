@@ -76,6 +76,10 @@ For complexed data structures, you might have to do multiple F.explode()
 by combining select() and/or withColumn()
 
 
+**Note:***
+F.array(*cols) can add the value of multiple columns with the same datatype into an array and then you can run
+F.explode() to normalize the list from more than one columns. An [example](https://stackoverflow.com/questions/50884060/get-unique-values-when-concatenating-two-columns-pyspark-data-frame) from stackoverflow.
+
 **My experience:**
 
 + When the function returns a scalar, then use withColumn(), 
@@ -147,6 +151,22 @@ to refer to one of its elements, i.e. `m.device` in the following example:
 df.select(F.min(F.struct('id', 'device', 'others')).alias('m')) \
   .select(F.col('m.device'))
 ```
+
+### To convert an array into string:
+
+Convert a array into string:    F.concat_ws(',', df.Group_con).alias('a_list')
++---+--------------------------------------------------------------------------+
+|id |Group_con                                                                 |
++---+--------------------------------------------------------------------------+
+|3  |[cctv, mac pro, spy camera, mac]                                          |
+|1  |[windows pc, iphone5, windows, iphone, android phone, spy camera, android]|
+|2  |[apple iphone, camera, iphone]                                            |
++---+--------------------------------------------------------------------------+
+
+
+https://stackoverflow.com/questions/50884060/get-unique-values-when-concatenating-two-columns-pyspark-data-frame/50884489?noredirect=1#comment88833157_50884489
+
+
 
 ## JSON string: ##
 
