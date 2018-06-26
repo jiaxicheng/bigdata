@@ -22,7 +22,7 @@ conf = SparkConf().setAppName("Count.Word.Pairs").setMaster("spark://lexington:7
 sc = SparkContext(conf=conf)
 
 def asplit(x):
-   z = x.split()
+   z = x.lower().split()
    return [ ((z[i], z[i+1]),1) for i in range(len(z)-1) ]
 
 ```
@@ -193,7 +193,7 @@ rdd1.aggregate([''], merge_within_partition, merge_between_partitions)
 ### Method-4: Using sc.textFile() and rdd.fold() function ###
 
 The difference between a fold() and reduce() is that fold() provides
-an opportunity to setup an initial values, thus in func(x, y), you dont
+an opportunity to setup an initial value, thus in func(x, y), you dont
 need to worry about the data type of `x`, it will always be a list
 after we setup the zeroValue to ['']
 
@@ -216,4 +216,37 @@ rdd1.fold([''], fold_lines_in_paragraph)
 
 ```
 
+### Method-5: Using newAPIHadoopFile and specify delimiter ###
 
+Method 2,3,4 all have issues when processing large files, since these reduce-like methods (
+reduce, aggregate and fold) are all actions which need return data to driver and then reload
+them into RDD using method like sc.parallelize(). this posts big overhead on both memory and network 
+bandwidth. 
+
+Using foldByKey() might be a solution, but since it invokes a shuffling and thus
+might potentially change the order of lines (even if we use a constant Key). the reduce-like
+method still need to collect all data into one list. this will eventually raise memory issue 
+when the final resultset is huge.
+
+A better solution is to use newAPIHadoopFile() to load datafile, this method provides a way
+to specify the delimiter, in our case it can be '\n\n'. and then process the data like the Method-1
+but without loading the whole file once at a time. 
+
+```
+rdd = sc.newAPIHadoopFile(
+    '/path/to/file', 
+    'org.apache.hadoop.mapreduce.lib.input.TextInputFormat',
+    'org.apache.hadoop.io.LongWritable',
+    'org.apache.hadoop.io.Text', 
+    conf={'textinputformat.record.delimiter': '\n\n'}
+)
+
+rdd.flatMap(lambda x: [t for t in asplit(x[1])]) \
+   .reduceByKey(add) \
+   .top(5,key=lambda x: x[1])
+
+```
+
+Further reading and References: 
++ [n-gram](https://en.wikipedia.org/wiki/N-gram)
++ [Create spark data structure from multiline record](https://stackoverflow.com/questions/31227363/creating-spark-data-structure-from-multiline-record)
