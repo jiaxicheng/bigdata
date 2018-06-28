@@ -35,7 +35,7 @@ while read -r id server; do
     fi
     [[ $? -eq 0 ]] || issue+=($server)
     # check the server status
-    printf "\t<-- $server: $(nc $server 2181 <<<ruok || echo down)\n"
+    printf "\t<-- $server: $(nc $server 2181 <<<ruok 2>/dev/null || echo down)\n"
 done < <( perl -lne '/^server\.(\d+)=(\w+)/ && print "$1 $2"' "$conf_file" )
 
 # any issue detected list the servers
