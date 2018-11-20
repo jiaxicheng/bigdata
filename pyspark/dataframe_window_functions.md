@@ -5,16 +5,16 @@ Some common patterns using pyspark.sql Window Functions:
 from pyspark.sql import Window
 
 # default unbounded window
-WindowSpec = Window.PartitionBy(*cols) \
+WindowSpec = Window.partitionBy(*cols) \
                    .orderBy(*col)
 
 # rowsBetween() to count number of rows
-WindowSpec = Window.PartitionBy(*cols) \
+WindowSpec = Window.partitionBy(*cols) \
                    .orderBy(*col) \         
                    .rowsBetween(start, end)      
                    
 # rangeBetween can be used to count offset (useful for time series)
-WindowSpec = Window.PartitionBy(*cols) \
+WindowSpec = Window.partitionBy(*cols) \
                    .orderBy(*col) \         
                    .rangeBetween(start, end)
 ```
