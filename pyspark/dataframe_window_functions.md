@@ -57,6 +57,20 @@ df.withColumn('unix_ts', F.unix_timestamp(F.col('timestamp'), 'yyyy-MM-dd HH:mm:
 with rowsBetween(), you can use String, Timestamp etc in orderBy()
 and the window will be counted by number of rows.
 
+**Note:**
+
+  + Some of the window function only applied to a certain Window ranges, for example, 
+    `row_number()`, `rank()` only applied to `specifiedwindowframe(Window.unboundedPreceding, Window.currentRow)`
+    using .rangeBetween(Window.unboundedPreceding, Window.unboundedFollowing) will yield errors.
+  + `F.count('*').over(win)` if not specify rangeBetween()/rowsBetween(), then it will be a running count
+    , similar to row_number(). to count the number of all rows in the same partition, you will need to 
+    specify the range:
+
+```
+      win2 = Window.partitionBy(partition_cols).orderBy(F.desc(order_col)) \
+                   .rangeBetween(Window.unboundedPreceding, Window.unboundedFollowing)
+```
+
 ### Available Window functions:
   + Ranking functions: rank(), dense_rank(), percent_rank(), ntile() and row_number()
   + Analytic functions: come_dist(), first_value(), last_value(), lag() and lead()
@@ -67,6 +81,8 @@ and the window will be counted by number of rows.
   + unboundedPreceding, unboundedFollowing, which can be setup with the following Python code:
 ```
   .rangeBetween(-sys.maxsize, sys.maxsize)
+  ## or
+  .rangeBetween(Window.unboundedPreceding, Window.unboundedFollowing)
 ```
 
 ## Example-1: Select the first row of each groupby
@@ -157,6 +173,5 @@ print(total)
 
 Reference:
 [1] [How to select the first row of each group](https://stackoverflow.com/questions/33878370/how-to-select-the-first-row-of-each-group)
-
-*More to come...*
+[2] [How to remove duplicates from a spark data frame while retaining the latest?](https://stackoverflow.com/questions/55660085/how-to-remove-duplicates-from-a-spark-data-frame-while-retaining-the-latest/55698532)
 
