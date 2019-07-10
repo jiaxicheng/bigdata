@@ -180,29 +180,16 @@ F.concat_ws(',', df.Group_con).alias('a_list')
 
 ### F.from_json(col, schema, options={}) ###
 
-TODO...
+As of pyspark 2.4+, we can use F.schema_of_json() to infer the schema from the Raw JSON string.
+this makes it easy to convert JSON string into Python data strutures and then convert them into
+Rows or Columns.
 
-**Limitation:**  only takes structs or array of structs.
+This is the most versatile JSON-parsing function that can be used with pyspark.
 
+### JSON to Columns: F.get_json_object(col, jsonpath) ###
 
-### F.get_json_object(col, jsonpath) ###
-
-Need particular elements in a JSON string, one jsonpath a time
-return null is the input json string is invalid. 
-
-JSONPath online validator: [http://jsonpath.com/](http://jsonpath.com/)
-```
-s = """[{"1123798":"Other, poets"},{"1112194":"Poetry for kids"}]"""
-```
-For the above JSON string, JSONPath to get all keys are: `$[*].*`
-[
-  "Other, poets",
-  "Poetry for kids"
-]
-
-However, this does not work for F.get_json_object() since it only accepts a scalar return.
-Thus, this function is most likely useful only when you know the key of the dictionary and 
-its return will always be a string.
+To retrieve particular elements of a JSON string into Columns, one JSONPath a time,
+return null if the input json string is invalid. For example:
 
 ```
 In [901]: df2 = spark.createDataFrame(
@@ -227,8 +214,47 @@ In [903]: df2.select('catalogid', F.get_json_object('catalogpath', '$.key').alia
 ```
 **Note:** The resulting `desc_key` is a String which can not be directly explode()
 
-### F.json_tuple(col, *fields) ###
-Create a new Row for a json column according to the given field names
+**Note:** The JSONPath implemenation with pyspark is limited, many features
+like filter expression, script expressiong etc are not supported. see [link](https://cwiki.apache.org/confluence/display/Hive/LanguageManual+UDF#LanguageManualUDF-get_json_object)
+
+JSONPath online validator: [http://jsonpath.com/](http://jsonpath.com/)
+```
+s = """[{"1123798":"Other, poets"},{"1112194":"Poetry for kids"}]"""
+```
+
+For the above JSON string, JSONPath to get the key "1123798" is: `$[?(@["1123798"])]`
+
+```
+[
+  {
+    "Other, poets",
+  }
+]
+```
+
+However, this does not work for F.get_json_object() since the filter expression ?() is not supported.
+
+For pyspark 2.4+, a workaround is to use F.from_json() to convert the field into Python data
+and then use F.expr and filter() function, see below
+
+```
+    df1 = spark.createDataFrame([(s,)],['data'])
+    schema = u'array<struct<`1112194`:string,`1123798`:string>>'
+    df1.withColumn('d1', F.from_json('data', schema)) \
+       .select(F.expr('filter(d1, x -> x["1112194"] != "")').alias('1112194')) \
+       .show()
+    +--------------------+
+    |             1112194|
+    +--------------------+
+    |[[Poetry for kids,]]|
+    +--------------------+
+
+```
+
+### JSON to Rows: F.json_tuple(col, *fields) ###
+Create a new Row for a json column according to the given field names. This is very useful when 
+the JSON string is an array and have some common keys. F.json_tuple will explode the selected JSON
+fields directly into Rows.
 
 **Con:** can handle only some simple Map, and the field names must be fixed
 
