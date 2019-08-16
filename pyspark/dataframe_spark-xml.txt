@@ -1,0 +1,79 @@
+spark-xml Python API: https://github.com/databricks/spark-xml#python-api
+
+Sample-1: 
+    https://docs.microsoft.com/en-us/previous-versions/windows/desktop/ms762271(v=vs.85)
+
+"""Load XML into spaek dataframe:
+(1) can also use `.format('xml')` to replace `.format("com.databricks.spark.xml")`
+(2)  must specify `rowTag` to form the Row object in DataFrame
+"""
+
+    df = spark.read.format("com.databricks.spark.xml") \
+              .options(rowTag="book", rootTag="catalog") \
+              .load('file:///home/hdfs/test/pyspark/xml-1.txt')
+
+    df.show()
+    +-----+--------------------+--------------------+---------------+-----+------------+--------------------+
+    |  _id|              author|         description|          genre|price|publish_date|               title|
+    +-----+--------------------+--------------------+---------------+-----+------------+--------------------+
+    |bk101|Gambardella, Matthew|An in-depth look ...|       Computer|44.95|  2000-10-01|XML Developer's G...|
+    |bk102|          Ralls, Kim|A former architec...|        Fantasy| 5.95|  2000-12-16|       Midnight Rain|
+    |bk103|         Corets, Eva|After the collaps...|        Fantasy| 5.95|  2000-11-17|     Maeve Ascendant|
+    |bk104|         Corets, Eva|In post-apocalyps...|        Fantasy| 5.95|  2001-03-10|     Oberon's Legacy|
+    |bk105|         Corets, Eva|The two daughters...|        Fantasy| 5.95|  2001-09-10|  The Sundered Grail|
+    |bk106|    Randall, Cynthia|When Carla meets ...|        Romance| 4.95|  2000-09-02|         Lover Birds|
+    |bk107|      Thurman, Paula|A deep sea diver ...|        Romance| 4.95|  2000-11-02|       Splish Splash|
+    |bk108|       Knorr, Stefan|An anthology of h...|         Horror| 4.95|  2000-12-06|     Creepy Crawlies|
+    |bk109|        Kress, Peter|After an inadvert...|Science Fiction| 6.95|  2000-11-02|        Paradox Lost|
+    |bk110|        O'Brien, Tim|Microsoft's .NET ...|       Computer|36.95|  2000-12-09|Microsoft .NET: T...|
+    |bk111|        O'Brien, Tim|The Microsoft MSX...|       Computer|36.95|  2000-12-01|MSXML3: A Compreh...|
+    |bk112|         Galos, Mike|Microsoft Visual ...|       Computer|49.95|  2001-04-16|Visual Studio 7: ...|
+    +-----+--------------------+--------------------+---------------+-----+------------+--------------------+
+
+Sample-2:
+'''
+<?xml version="1.0" encoding="utf-8"?>
+<tags>
+  <row Id="1" TagName="inclination" Count="18" ExcerptPostId="553" WikiPostId="552" />
+  <row Id="3" TagName="exoplanet" Count="219" ExcerptPostId="11" WikiPostId="10" />
+</tags>
+'''
+
+    df = spark.read.format("xml") \
+                   .option("rowTag", "row") \
+                   .option("path", 'file:///home/hdfs/test/pyspark/xml-2.txt') \
+                   .load()
+    df.show()
+    +------+--------------+---+-----------+-----------+
+    |_Count|_ExcerptPostId|_Id|   _TagName|_WikiPostId|
+    +------+--------------+---+-----------+-----------+
+    |    18|           553|  1|inclination|        552|
+    |   219|            11|  3|  exoplanet|         10|
+    +------+--------------+---+-----------+-----------+
+    
+################
+Options:
+* rowTag: the XML tag to identify Row object
+* valueTag: used when there is no child-element but attributes, this will becomes `struct`,
+            _VALUE as the name of the Value in this element
+* path: location to read/write file, can also be specified with load() method
+* samplingRatio / inferSchema: by default schema is inferred based on the first Row object in file 
+* attributePrefix: by default, all attributes have a underscore '_' prefix
+* compression (only for Writing): compression codec to use when saving to file (bzip2, gzip, lz4, snappy)
+
+for more check link: https://github.com/databricks/spark-xml#features
+
+Software installation notes:
+(1) Install sbt:
+  wget http://dl.bintray.com/sbt/rpm/sbt-0.13.5.rpm
+  rpm -ivh sbt-0.13.5.rpm
+
+(2) download spark-xml
+  git clone https://github.com/databricks/spark-xml.git
+  cd spark-xml
+  sbt package
+
+(3) copy the target jar file to SPARK_HOME/jars folder, sync to all worker nodes
+  cp target/scala-2.11/spark-xml_2.11-0.6.0.jar SPARK_HOME/jars
+
+
