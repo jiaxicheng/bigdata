@@ -33,6 +33,7 @@ Procedures:
 (3) create {PROJECTROOT}/project/assembly.sbt to add assembly plugins 
 
 The files/directories under the {PROJECTROOT} should have the following structure:
+```
 .
 ├── build.sbt
 ├── project
@@ -45,5 +46,31 @@ The files/directories under the {PROJECTROOT} should have the following structur
                 └── jxc
                     └── spark
                         └── udf1.scala
+```
 
+(4) Run the following command to compile the jar file
+```
+    sbt clean assembly
+```
 
+(5) copy the jar file to proper location
+```
+    {PROJECTROOT}/target/scala-<scala_version>/<project_name>-assembly-<project_version>.jar
+```
+
+(6) run pyspark or spark-submit
+```
+    pyspark --jars /path/to/my_udf-assembly-1.0.jar
+```
+
+(7) use spark.udf.registerJavaFunction() to reguster the Scala UDF and use it with Spark SQL
+    context, for example: df.selectExpr()
+
+``` 
+    # register Scala UDF with spark.udf.registerJavaFunction()
+    spark.udf.registerJavaFunction('set_group_label_2', 'com.jxc.spark.SetGroupLabel2', 'array<struct<t:double,g:int>>')
+
+    # use the named udf in Spark SQL, i.e. spark.sql(), selectExpr() or pyspark.sql.functions.expr()
+    df.selectExpr('explode(set_group_label_2(arr, 6))')
+    
+```
