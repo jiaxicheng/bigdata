@@ -1,32 +1,17 @@
 Scala-based UDF function for pyspark
 -----
 
-Convert the following pyspark UDF to Scala UDF:
-```
-@F.udf('array<struct<t:double,g:int>>')
-def set_group_label(arr):
-    """This function set up a sub-group label based on the offset of 5
-    from the first entries and rolling forward. gaps could exist between
-    adjacent sub-groups. so a fixed Window funcion will not work. This
-    function uses a Python UDF function to iterate through an array column
-    which has the collect_list of the same group. the function will sort the
-    list and check the distanct from the first_item in the same subgroup,
-    when it exceeds the threshold `5`, increment the sub-group-id `g` and 
-    reset the first_item of the new sub-group.
-    """
-    g = 0; w0 = 0; new_arr = []
-    for x in sorted(arr):
-        if x - w0 >= 5.0001:
-            g += 1
-            w0 = x
-        new_arr.append({'t':x, 'g':g})
-    return new_arr
-```
+### Procedures:
 
-Procedures:
+#### 1. Create the jar file containing Scala functions
 
-(1) create a scala file {PROJECTROOT}/src/main/scala/com/jxc/spark/udf1.scala containing the 
-    class `com.jxc.spark.SetGroupLabel` to setup the Scala-based UDF function
+##### Method-1:
+
+(1) create a scala file {PROJECTROOT}/src/main/scala/com/jxc/spark/udf1.scala 
+    where the {PROJECTROOT}/src/main/scala is base folder for scala source code
+    `com/jxc/spark` corresponding to your package name. In the file, we create a 
+    package `com.jxc.spark` and class `SetGroupLabel` and override its default 
+    call method with the same code logic we set up using Python.
 
 (2) create {PROJECTROOT}/build.sbt file to add basic project information and dependencies
 
@@ -50,21 +35,51 @@ The files/directories under the {PROJECTROOT} should have the following structur
 
 (4) Run the following command to compile the jar file
 ```
+    cd "${PROJECTROOT}"
     sbt clean assembly
 ```
 
-(5) copy the jar file to proper location
+##### Method_2:
+
+Simiar to Method_1, but without using the assembly plugins, skip the files under `project` folder 
+and run the following command to build the jar file:
 ```
-    {PROJECTROOT}/target/scala-<scala_version>/<project_name>-assembly-<project_version>.jar
+    cd "${PROJECTROOT}"
+    sbt clean package
 ```
 
-(6) run pyspark or spark-submit
+The jar file created from Method_2 is significantly smaller than the size from Method_1 and is
+much faster to compile. Below is the final directory tree structure of this method:
 ```
-    pyspark --jars /path/to/my_udf-assembly-1.0.jar
+.
+├── build.sbt
+└── src
+    └── main
+        └── scala
+            └── com
+                └── jxc
+                    └── spark
+                        └── udf2.scala
 ```
 
-(7) use spark.udf.registerJavaFunction() to reguster the Scala UDF and use it with Spark SQL
-    context, for example: df.selectExpr()
+#### 2. Set up the UDF
+
+After we have jar file, find the jar file under `{PROJECTROOT}/target/scala-<scala_version>/` and copy it 
+to a proper location, and then run pyspark or spark-submit
+```
+    pyspark --jars /path/my_udf-assembly-1.0.jar
+
+    spark-submit --jars /path/my_udf-assembly-1.0.jar my_pthon_file.py
+
+```
+
+In Python, we can do:
+
++ method_1: use spark.udf.registerJavaFunction() to reguster the Scala UDF 
++ method_2: use spark._jvm to set up the Scala UDF
+
+and use the function with Spark SQL context, for example: df.selectExpr(), pyspark.sql.functions..expr()
+or spark.sql() 
 
 ``` 
     # register Scala UDF with spark.udf.registerJavaFunction()
