@@ -25,24 +25,28 @@ The proposed solution below could applied only if:
 from pyspark.sql import SparkSession, Row
 from string import lower
 
-# set Row object
+# set up Row object
 def setRow(x):
-    # convert line into key/value tuples. strip spaces and lowercase the `k`
+    """ convert line into key/value tuples. strip spaces and lowercase the `k` """
     z = dict((lower(k.strip()), v.strip()) for e in x.split(',') for k,v in [ e.split(':') ])
 
-    # make sure all columns shown in the Row object
+    """ make sure all columns shown in the Row object """
     return Row(**dict((c, z[c] if c in z else None) for c in map(lower, columns)))
 
 if __name__ == "__main__":
 
     # create SparkSession
-    spark = SparkSession.builder                          \
-                        .master("spark://lexington:7077") \
-                        .appName("pyspark-test1")         \
+    spark = SparkSession.builder                   \
+                        .master("local[*]")        \
+                        .appName("pyspark-test1")  \
                         .getOrCreate()
 
     # initialize the RDD
-    rdd = spark.sparkContext.textFile("key-value-file")
+    # rdd = spark.sparkContext.textFile("/path/to/key-value-file")
+    rdd = spark.sparkContext.parallelize([
+          'name:Pradnya,IP:100.0.0.4, college: SDM, year:2018'
+        , 'name:Ram, IP:100.10.10.5, college: BVB, semester:IV, year:2018'
+    ])
 
     # define a list of all field names
     columns = ['name', 'IP', 'College', 'Semester', 'year']
