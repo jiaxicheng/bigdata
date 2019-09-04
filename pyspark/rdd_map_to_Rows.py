@@ -25,18 +25,6 @@ The proposed solution below could applied only if:
 from pyspark.sql import SparkSession, Row
 from string import lower
 
-# create SparkSession
-spark = SparkSession.builder                          \
-                    .master("spark://lexington:7077") \
-                    .appName("pyspark-test1")         \
-                    .getOrCreate()
-
-# initialize the RDD
-rdd = spark.sparkContext.textFile("key-value-file")
-
-# define a list of all field names
-columns = ['name', 'IP', 'College', 'Semester', 'year']
-
 # set Row object
 def setRow(x):
     # convert line into key/value tuples. strip spaces and lowercase the `k`
@@ -45,15 +33,28 @@ def setRow(x):
     # make sure all columns shown in the Row object
     return Row(**dict((c, z[c] if c in z else None) for c in map(lower, columns)))
 
-# map lines to Row objects and then convert the result to dataframe
-df = rdd.map(setRow).toDF()
-df.show()
-#+-------+-----------+-------+--------+----+
-#|college|         ip|   name|semester|year|
-#+-------+-----------+-------+--------+----+
-#|    SDM|  100.0.0.4|Pradnya|    null|2018|
-#|    BVB|100.10.10.5|    Ram|      IV|2018|
-#+-------+-----------+-------+--------+----+
+if __name__ == "__main__":
 
-# more operations on df
-spark.stop()
+    # create SparkSession
+    spark = SparkSession.builder                          \
+                        .master("spark://lexington:7077") \
+                        .appName("pyspark-test1")         \
+                        .getOrCreate()
+
+    # initialize the RDD
+    rdd = spark.sparkContext.textFile("key-value-file")
+
+    # define a list of all field names
+    columns = ['name', 'IP', 'College', 'Semester', 'year']
+
+    # map lines to Row objects and then convert the result to dataframe
+    df = rdd.map(setRow).toDF()
+    df.show()
+    #+-------+-----------+-------+--------+----+
+    #|college|         ip|   name|semester|year|
+    #+-------+-----------+-------+--------+----+
+    #|    SDM|  100.0.0.4|Pradnya|    null|2018|
+    #|    BVB|100.10.10.5|    Ram|      IV|2018|
+    #+-------+-----------+-------+--------+----+
+
+    spark.stop()
