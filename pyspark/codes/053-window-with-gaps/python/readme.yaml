@@ -1,0 +1,33 @@
+--- 
+Logs: 
+  COMPLETED: 
+    - 
+      053_window_with_gaps-pyspark_udf.py: 
+        objective: "use pyspark.sql.functions.udf()"
+        script: |2
+           spark-submit 053_window_with_gaps-pyspark_udf.py
+
+    - 
+      053_window_with_gaps-scala_udf_with_long.py: 
+        objective: "use scala udf, pass the arguments as data type `Long`"
+        compile_jar_file: |2
+
+           jar_file=../scala_udf_with_long/target/scala-2.11/053_window_long_2.11-1.0.jar;
+           (cd ../scala_udf_with_long && sbt clean package)
+
+        script: |2
+
+           spark-submit --jars "$jar_file" 053_window_with_gaps-scala_udf_with_long.py
+
+    - 
+      053_window_with_gaps-scala_udf_with_date.py: 
+        scalas_packages: "java.sql.{Date,Timestamp}, java.util.Calendar"
+        objective: "use scala udf, pass the arguments as data type `Date`"
+        compile_jar_file: |2
+
+           jar_file=../scala_udf_with_date/target/scala-2.11/053_window_date_2.11-1.0.jar;
+           (cd ../scala_udf_with_date && sbt clean package)
+
+        scripts: |2
+
+           spark-submit --jars "$jar_file" 053_window_with_gaps-scala_udf_with_date.py
