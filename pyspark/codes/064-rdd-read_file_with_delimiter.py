@@ -96,7 +96,7 @@ def parse_rdd_element(x, kargs):
                 if m:
                     row['Item_Id'] = 'Q' + m.group(1)
         # if row is not EMPTY, set None to missing field
-        return Row(**dict([ (k, row[k]) if k in row else (k, None) for k in kargs['columns']])) if row else None
+        return Row(**dict([ (k, row.get(k, None)) for k in kargs['columns']])) if row else None
     except:
         return None
 
