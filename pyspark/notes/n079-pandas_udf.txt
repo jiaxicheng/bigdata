@@ -1,0 +1,116 @@
+
+Pandas UDF is a PySpark DataFrame API function added since Spark 2.3. Unlike the original 
+UDF function, the pandas_udf is a vectorized version of UDF which can use some of the Pandas functions.
+
+The drawbacks of the original UDF:
+(1) data serialization/deserialization between Python interpretor and JVM
+(2) calculation are performed on row-basis which is low efficient
+
+Note: Pandas UDF overcame the 2nd drawback but the data SerDe between Python and JVM
+still holds. 
+
+Select functions(if available) in the following order:
+(1) Spark SQL builtin functions or Dataframe API functions
+(2) Scala-based UDF functions
+(3) pyspark.sql.functions.pandas_udf
+(4) pyspark.sql.functions.udf
+
+When using udf might be better than using Spark SQL or API functions:
++ if pyspark.sql.functions.explode() involves mass increment on data volume
++ if using udf can avoid shuffling of big volumn of data, i.e. df.join
+
+When to use Pandas UDF:
+(1) when the functionality is not available through Spark SQL or DataFrame API functions
+(2) only when the function can be vectorized. In another word, if the operation can not be
+    vectorized, for example, a stateful list which value relies on the updated values of
+    its neighbouring rows. In such case, using the original udf, either backed by
+    Scala or Python.
+ 
+Three PandasUDFType (as of Spark 2.4.3):
++ SCALAR:
+  + function argument(s): is a series 
+  + function returning a scalar
+  + where_to_use:
+    + pyspark.sql.DataFrame.withColumn()
+    + pyspark.sql.DataFrame.select()
+
++ GROUPED_MAP: 
+  + function argument(key, pdf), 
+    + key is optional, if exist contains a tuple of all columns in the groupby() function.
+    + pdf is the Pandas dataframe containing rows in the current group
+  + function returning a dataframe, returnType should be df.schema or any customized StructType()
+    Note: the function can return all fields after groupby even though not in groupby and aggregation list
+  + where_to_use: 
+    + pyspark.sql.GroupedData.apply()
+        df.groupby('c1', 'c2').apply(my_pudf_func)
+
++ GROUP_AGG
+  + function argument(s1, s2): one or more Series
+  + returning a Scalar
+  + where to use: 
+    + pyspark.sql.GroupedData.agg()
+        df.groupby('c1', 'c2').agg(my_pudf_func)
+    + pyspark.sql.Window
+        df.withColumn('c2', my_udf_func('c1').over(w1))
+      Note: for Window function, only support unbounded WindowSpec
+
+Some Examples:
+
+Example-1: pandas.Series.interpolate()
+
+This Pandas function returns Series or DataFrame, so we can only use GROUPED_MAP:
+
+    df = spark.createDataFrame([
+          ('A', 't0', None) 
+        , ('A', 't1', 1.5) 
+        , ('A', 't2', 1.7) 
+        , ('B', 't3', 0.5) 
+        , ('B', 't4', None) 
+        , ('B', 't5', 1.1) 
+        , ('C', 't6', 4.3) 
+        , ('C', 't7', 3.4) 
+        , ('C', 't8', None) 
+        , ('C', 't9', 2.7) 
+      ], schema='Key:string,time:string,value:double')
+
+    df.show()                                                                                                           
+    +---+----+-----+
+    |Key|time|value|
+    +---+----+-----+
+    |  A|  t0| null|
+    |  A|  t1|  1.5|
+    |  A|  t2|  1.7|
+    |  B|  t3|  0.5|
+    |  B|  t4| null|
+    |  B|  t5|  1.1|
+    |  C|  t6|  4.3|
+    |  C|  t7|  3.4|
+    |  C|  t8| null|
+    |  C|  t9|  2.7|
+    +---+----+-----+
+
+    # in this function, you can handle any Pandas operations
+    def f_interp(pdf): 
+        pdf['value'] = pdf.sort_values('time').value.interpolate(method='nearest') 
+        return pdf 
+
+    # set up Pandas UDF function:
+    udf_interp = F.pandas_udf(f_interp, df.schema, F.PandasUDFType.GROUPED_MAP) 
+
+    df.groupby('Key').apply(udf_interp).show()
+    +---+----+-----+                                                                
+    |Key|time|value|
+    +---+----+-----+
+    |  B|  t3|  0.5|
+    |  B|  t4|  0.5|
+    |  B|  t5|  1.1|
+    |  C|  t6|  4.3|
+    |  C|  t7|  3.4|
+    |  C|  t8|  3.4|
+    |  C|  t9|  2.7|
+    |  A|  t0| null|
+    |  A|  t1|  1.5|
+    |  A|  t2|  1.7|
+    +---+----+-----+
+
+
