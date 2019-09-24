@@ -1,0 +1,66 @@
+Compare functions between DataFrame API and SparkSQL (As of Spark 2.4.0)
+
+Functions in DataFrame API, but not in SparkSQL:
+---
+ + udf, pandas_udf
+ + broadcast, lit, expr, col, column
+ + asc, asc_nulls_first, asc_nulls_last, desc, desc_nulls_first, desc_nulls_last
+
+
+Functions only in Spark SQL, not in DataFrame API
+---
+ + higher-order functions: transform, exists, filter, aggregate, zip_with
+ + XML related: xpath, xpath_boolean, xpath_double, xpath_float, xpath_int
+              , xpath_long, xpath_number, xpath_short, xpath_string
+ + stack: can be used to demornalize a df
+ + find_in_set: 
+ + named_struct: like struct, map, array, very useful
+ + str_to_map: like split, but create a MapType() from string
+ + sentences: split paragraph into array of arrays (sentences of words)
+ + percentile: can be used to calculate median
+ + elt: similar to choose() in Pentaho
+ + other less used:
+   + nvl, nvl2, nullif, not, isnotnull
+   + cube, cot, e, pi, ln, std, power, sign, mod, pmod, negative, positive, count_min_sketch
+   + day, weekday, now, to_unix_timestamp
+   + space, chr, binary, char, bit_length, char_length, character_length, octet_length
+   + inline, inline_outer: similar to explode, explode_outer (array of structs, not very useful)
+   + parse_url
+   + current_database, input_file_block_length, input_file_block_start
+   + java_method, cardinality, assert_true, rollup, reflect, uuid
+
+
+Functions only in SparkSQL which can be simulated with DF API:
+---
+ + like -> df.rlike
+ + left, right -> sql:substring  left(A,2) -> substring('A',1,2)  right(A,2) -> substring('A',-2,2)
+ + position -> sql:{instr,locate}
+ + replace -> sql:regexp_replace
+ + printf -> sql:format_string
+ + upper,lower -> sql:{upper,lower}
+ + if,ifnull ->  df:{when,otherwise}
+
+
+Exist in both but using different names:
+---
+ + df:create_map -> sql:map
+ + df:bitwiseNOT -> sql:~
+ + df:countDistince -> sql:count(distinct ..)
+ + df:sumDistinct  -> sql:sum(distinct ..)
+ + df.approxQuantile(col, probabilities, relativeError) -> sql:{approx_percentile,percentile_approx}
+ + df:{astype,cast} -> sql:{int,bigint,boolean,decimal,double,date,float,string,timestamp,tinyint,smallint}
+
+
+Exist in both but work differently
+---
+ + regexp_replace(), regexp_extract():
+   DF version support PCRE regex, can use \1, \2 in pattern and $1, $2 in replacement
+   Spark SQL version does not support PCRE
+ +
+
+
+Some notes:
+---
+  (1) in DF-API, logic '|', '&', but in SQL, need 'or', 'and'
+
+
