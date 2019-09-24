@@ -111,3 +111,34 @@ Data Setup:
     |  1|  1|  0|  0|  0|  1|  1|  1|  0|  0|
     |  1|  1|  0|  1|  1|  0|  0|  0|  0|  1|
     +---+---+---+---+---+---+---+---+---+---+
+
+Another similiar topic: Take row-wise ranking:
+https://stackoverflow.com/questions/58065950/ranking-columns-in-pyspark-dataframe
+
+    df = spark.createDataFrame([
+             (99, 30, 21)
+            , (20, 10, 44)
+            , (50, 90, 87)
+            , (78, 11, 9)
+          ], ('A', 'B', 'C')
+    )
+
+    cols = df.columns
+
+    # rank, row_number does not make much sense
+    df.withColumn('arr', F.array_sort(F.array(cols))).selectExpr('*', '''
+        filter(sequence(1,size(arr)), i -> arr[i-1] == A)[0] AS rank_of_A
+    ''').show()
+    +---+---+---+------------+---------+
+    |  A|  B|  C|         arr|rank_of_A|
+    +---+---+---+------------+---------+
+    | 99| 30| 21|[21, 30, 99]|        3|
+    | 20| 10| 44|[10, 20, 44]|        2|
+    | 50| 90| 87|[50, 87, 90]|        1|
+    | 78| 11|  9| [9, 11, 78]|        3|
+    +---+---+---+------------+---------+
+
+    # dense_rank: add array_distinct(), below pesudo-code
+
+        arr = array_sort(array_distinct(array(cols))))
+
