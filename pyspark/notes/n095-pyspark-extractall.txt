@@ -94,3 +94,18 @@ Select Map elements only with the key in the atoms list. set to '0' if key is mi
     |               A0|  0|  0|  0|  0|  0|  0|  0|
     +-----------------+---+---+---+---+---+---+---+
     
+
+Note: can use fillna() for coalesce(), but need to make sure the DataType() is right:
+
+# use IntegerType()
+
+    df1.select('molecular_formula', *[ col('atom_map')[a].astype('int').alias(a) for a in atoms ]) \
+       .fillna(0, subset=atoms) \
+       .show()
+
+# use StringType()
+
+    df1.select('molecular_formula', *[ col('atom_map')[a].alias(a) for a in atoms ]) \
+       .fillna('', subset=atoms) \
+       .show()
+
