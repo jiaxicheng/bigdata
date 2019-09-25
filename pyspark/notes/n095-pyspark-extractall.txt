@@ -1,0 +1,96 @@
+"""
+https://stackoverflow.com/questions/56060109/capturing-numbers-in-a-string-and-storing-in-data-frame-in-python/56063556#56063556
+
+Target: split a string of sequence of concatenated atom:count_of_atom (count_of_atom can be None)
+        atoms must be from a selected list
+
+With Pandas, we can use Series.str.extractall(), in pyspark, there is no corresponding functions.
+pyspark.sql.functions.regexp_extract() retrieve only one from all capturing group. to handle this
+we can use regexp_replace() + str_to_map() to convert the String into a MapType(), and then
+iterate through the Map to retrieve the data. 
+
+The tricky part is to use regexp_replace() function to insert some characters into the string
+so that they can be used in str_to_map() function,
+
+Notes: 
++ str_to_map() only available through Spark SQL context
++ regexp_replace() must be used under DataFrame API, since the regex under Spark SQL does 
+  not support capturing groups.
++ for simplier version, use regexp_replace + split to convert String into a list, example:
+  https://github.com/jiaxicheng/stackoverflow/blob/master/pyspark/086-pyspark-regex_split_n_transform.txt
+
+"""
+
+Set Up the Dataframe
+
+    df = spark.createDataFrame([('C55H85N17O25S4',),('C23H65',),(None,), (None,), ('C22H16ClN3OS2',)
+                 , ('C37H42Cl2N2O6',), ('C21H30BrNO4',), ('C11H13ClN2',), ('C34H53NaO8',), ('A0',) 
+            ],['molecular_formula'])
+
+    df.show()
+    +-----------------+
+    |molecular_formula|
+    +-----------------+
+    |   C55H85N17O25S4|
+    |           C23H65|
+    |             null|
+    |             null|
+    |    C22H16ClN3OS2|
+    |    C37H42Cl2N2O6|
+    |      C21H30BrNO4|
+    |       C11H13ClN2|
+    |       C34H53NaO8|
+    |               A0|
+    +-----------------+
+
+    # listed atoms which should be shown in the final dataframe
+    atoms = ['C', 'H', 'O', 'N', 'Cl','S','Br']
+
+    # create the regex pattern string, same as we do with Pandas, 
+    # but no need for the named capturing groups
+    atom_ptn = r'(' + r'|'.join(sorted(atoms, key=len, reverse=True)) + r')(\d*)'
+    #print(atom_ptn)
+    #(Cl|Br|C|H|O|N|S)(\d+)
+
+Create df1 which use regexp_replace() + str_to_map() function to convert StringType() into MapType()
+
+    df1 = df.withColumn('atoms', regexp_replace('molecular_formula', atom_ptn, '$1:$2;')) \
+            .withColumn('atom_map', expr("str_to_map(atoms, ';', ':')")) 
+
+    df1.show(truncate=False)
+    +-----------------+-------------------------+------------------------------------------------------+
+    |molecular_formula|atoms                    |atom_map                                              |
+    +-----------------+-------------------------+------------------------------------------------------+
+    |C55H85N17O25S4   |C:55;H:85;N:17;O:25;S:4; |[C -> 55, H -> 85, N -> 17, O -> 25, S -> 4,  ->]     |
+    |C23H65           |C:23;H:65;               |[C -> 23, H -> 65,  ->]                               |
+    |null             |null                     |null                                                  |
+    |null             |null                     |null                                                  |
+    |C22H16ClN3OS2    |C:22;H:16;Cl:;N:3;O:;S:2;|[C -> 22, H -> 16, Cl -> , N -> 3, O -> , S -> 2,  ->]|
+    |C37H42Cl2N2O6    |C:37;H:42;Cl:2;N:2;O:6;  |[C -> 37, H -> 42, Cl -> 2, N -> 2, O -> 6,  ->]      |
+    |C21H30BrNO4      |C:21;H:30;Br:;N:;O:4;    |[C -> 21, H -> 30, Br -> , N -> , O -> 4,  ->]        |
+    |C11H13ClN2       |C:11;H:13;Cl:;N:2;       |[C -> 11, H -> 13, Cl -> , N -> 2,  ->]               |
+    |C34H53NaO8       |C:34;H:53;N:;aO:8;       |[C -> 34, H -> 53, N -> , aO -> 8,  ->]               |
+    |A0               |A0                       |[A0 ->]                                               |
+    +-----------------+-------------------------+------------------------------------------------------+
+    
+
+Select Map elements only with the key in the atoms list. set to '0' if key is missing
+    
+    df1.select('molecular_formula'
+            , *[ coalesce(col('atom_map')[a],lit(0)).alias(a) for a in atoms ]
+        ).show()
+    +-----------------+---+---+---+---+---+---+---+
+    |molecular_formula|  C|  H|  O|  N| Cl|  S| Br|
+    +-----------------+---+---+---+---+---+---+---+
+    |   C55H85N17O25S4| 55| 85| 25| 17|  0|  4|  0|
+    |           C23H65| 23| 65|  0|  0|  0|  0|  0|
+    |             null|  0|  0|  0|  0|  0|  0|  0|
+    |             null|  0|  0|  0|  0|  0|  0|  0|
+    |    C22H16ClN3OS2| 22| 16|   |  3|   |  2|  0|
+    |    C37H42Cl2N2O6| 37| 42|  6|  2|  2|  0|  0|
+    |      C21H30BrNO4| 21| 30|  4|   |  0|  0|   |
+    |       C11H13ClN2| 11| 13|  0|  2|   |  0|  0|
+    |       C34H53NaO8| 34| 53|  0|   |  0|  0|  0|
+    |               A0|  0|  0|  0|  0|  0|  0|  0|
+    +-----------------+---+---+---+---+---+---+---+
+    
