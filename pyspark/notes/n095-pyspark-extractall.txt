@@ -23,6 +23,8 @@ Notes:
 
 Set Up the Dataframe
 
+    from pyspark.sql.functions import regexp_replace, expr, coalesce, col, lit
+
     df = spark.createDataFrame([('C55H85N17O25S4',),('C23H65',),(None,), (None,), ('C22H16ClN3OS2',)
                  , ('C37H42Cl2N2O6',), ('C21H30BrNO4',), ('C11H13ClN2',), ('C34H53NaO8',), ('A0',) 
             ],['molecular_formula'])
@@ -77,7 +79,7 @@ Create df1 which use regexp_replace() + str_to_map() function to convert StringT
 Select Map elements only with the key in the atoms list. set to '0' if key is missing
     
     df1.select('molecular_formula'
-            , *[ coalesce(col('atom_map')[a],lit(0)).alias(a) for a in atoms ]
+            , *[ coalesce(col('atom_map')[a].astype('int'),lit(0)).alias(a) for a in atoms ]
         ).show()
     +-----------------+---+---+---+---+---+---+---+
     |molecular_formula|  C|  H|  O|  N| Cl|  S| Br|
@@ -86,18 +88,23 @@ Select Map elements only with the key in the atoms list. set to '0' if key is mi
     |           C23H65| 23| 65|  0|  0|  0|  0|  0|
     |             null|  0|  0|  0|  0|  0|  0|  0|
     |             null|  0|  0|  0|  0|  0|  0|  0|
-    |    C22H16ClN3OS2| 22| 16|   |  3|   |  2|  0|
+    |    C22H16ClN3OS2| 22| 16|  0|  3|  0|  2|  0|
     |    C37H42Cl2N2O6| 37| 42|  6|  2|  2|  0|  0|
-    |      C21H30BrNO4| 21| 30|  4|   |  0|  0|   |
-    |       C11H13ClN2| 11| 13|  0|  2|   |  0|  0|
-    |       C34H53NaO8| 34| 53|  0|   |  0|  0|  0|
+    |      C21H30BrNO4| 21| 30|  4|  0|  0|  0|  0|
+    |       C11H13ClN2| 11| 13|  0|  2|  0|  0|  0|
+    |       C34H53NaO8| 34| 53|  0|  0|  0|  0|  0|
     |               A0|  0|  0|  0|  0|  0|  0|  0|
     +-----------------+---+---+---+---+---+---+---+
-    
 
-Note: can use fillna() for coalesce(), but need to make sure the DataType() is right:
 
-# use IntegerType()
+Notes:
+
+(1) using astype('int') to convert EMPTY values into null, and then run coalesce(..) to
+    setup null value with `0`. make sure DataType() matches.
+
+
+(2) can also use df.fillna(), make sure the DataType() is right as well:
+# use IntegerType(), result is the same as the above.
 
     df1.select('molecular_formula', *[ col('atom_map')[a].astype('int').alias(a) for a in atoms ]) \
        .fillna(0, subset=atoms) \
@@ -108,4 +115,18 @@ Note: can use fillna() for coalesce(), but need to make sure the DataType() is r
     df1.select('molecular_formula', *[ col('atom_map')[a].alias(a) for a in atoms ]) \
        .fillna('', subset=atoms) \
        .show()
+    +-----------------+---+---+---+---+---+---+---+
+    |molecular_formula|  C|  H|  O|  N| Cl|  S| Br|
+    +-----------------+---+---+---+---+---+---+---+
+    |   C55H85N17O25S4| 55| 85| 25| 17|   |  4|   |
+    |           C23H65| 23| 65|   |   |   |   |   |
+    |             null|   |   |   |   |   |   |   |
+    |             null|   |   |   |   |   |   |   |
+    |    C22H16ClN3OS2| 22| 16|   |  3|   |  2|   |
+    |    C37H42Cl2N2O6| 37| 42|  6|  2|  2|   |   |
+    |      C21H30BrNO4| 21| 30|  4|   |   |   |   |
+    |       C11H13ClN2| 11| 13|   |  2|   |   |   |
+    |       C34H53NaO8| 34| 53|   |   |   |   |   |
+    |               A0|   |   |   |   |   |   |   |
+    +-----------------+---+---+---+---+---+---+---+
 
