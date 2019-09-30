@@ -238,21 +238,35 @@ spark.read
       + samplingRatio: default 1.0
       + dropFieldIfAllNull: default false
     + jdbc():
+      + url: example jdbc:mysql://127.0.1:3305/warehouse
+      + table
+      + properties: JDBC connection arguments: user, password etc
+      + column: an integer column for partitioning
+      + numPartitions, lowerBound, upperBound: used for partitions
+      + predicates: for partitions
     + orc():
     + parquet():
-    + text():
+      + mergeSchema: default is set spark.sql.parquet.mergeSchema
+    + text(): 
+      note: default is line mode.
+      + wholetext: if true, read each file as a single Row
+      + lineSep: default '\r?\n'
   + format with plugins:
-    + avro():
-    + xml():
+    + avro: since spark 2.4+, SparkSQL provides builtin support for reading/writing Apache Avro data
+      + pyspark --packages org.apache.spark:spark-avro_2.11:2.4.0
+    + xml: 
+      + spark-xml: https://github.com/databricks/spark-xml#python-api
       
   + load():
     * parameters: path, format, schema, options
   + table()
 
   Notes:
-  (1) json file can use single quotes(by default), no quotes(allowUnquotedFieldNames)
+  (1) JSON file can use single quotes(by default), no quotes(allowUnquotedFieldNames)
   (2) csv file sep must be single-char delimiter, for multi-char or regex, might have to go through RDD methods
   (3) mode=FAILFAST might not work as expected
+  (4) the option `mergeSchema` is currently only applied to parquet format, for orc, avro, you can 
+      explicitly specify the schema, spark will merge the result accororingly.
 
 
 
@@ -299,7 +313,10 @@ spark.write
     + orc(path, mode, partitonBy, compression)
     + parquet(path, mode, partitonBy, compression)
     + text(path, compression, lineSep): 
-      the DF must have only one column that is StringType()
+      *** the DF must have only one StringType() column
+  + format with plugins: 
+    + avro: 
+    + xml: 
   + save():
     * parameters: path, format, mode, partitionBy and options
   + insertInto(tableName, overwrite=False)
@@ -309,6 +326,10 @@ spark.write
     * sort the output in each bucket by the given cols
   + saveAsTable(tableName, format, mode, partitonBy, options)
 
+  Notes:
+  (1) `csv` format can not handle ArrayType(), StructType(), MapType() etc compound data types.
+      to save such data types, either convert them to JSON, or use another format, 
+      for example, parquet, orc, avro etc.
 
 
 
