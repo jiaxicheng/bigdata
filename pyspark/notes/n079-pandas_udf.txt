@@ -26,6 +26,7 @@ When to use Pandas UDF:
     its neighbouring rows. In such case, using the original udf, either backed by
     Scala or Python.
  
+
 Three PandasUDFType (as of Spark 2.4.3):
 + SCALAR:
   + function argument(s): is a series 
@@ -43,6 +44,8 @@ Three PandasUDFType (as of Spark 2.4.3):
   + where_to_use: 
     + pyspark.sql.GroupedData.apply()
         df.groupby('c1', 'c2').apply(my_pudf_func)
+  + examples:
+    + Series.interpolate()
 
 + GROUP_AGG
   + function argument(s1, s2): one or more Series
@@ -53,6 +56,12 @@ Three PandasUDFType (as of Spark 2.4.3):
     + pyspark.sql.Window
         df.withColumn('c2', my_udf_func('c1').over(w1))
       Note: for Window function, only support unbounded WindowSpec
+  + examples:
+    + pyspark.sql.Window:
+      Series.is_unique:  is_monotonic_increasing, is_monotonic_decreasing
+          udf_p1 = F.pandas_udf(lambda x: x.is_unique, 'boolean', F.PandasUDFType.GROUPED_AGG)
+      
+
 
 Some Examples:
 
