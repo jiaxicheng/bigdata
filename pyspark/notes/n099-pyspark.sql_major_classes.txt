@@ -1,0 +1,403 @@
+pyspark.sql notes:
+
+group all related method/functions under the same class to have a full understanding about the 
+current pyspark.sql library:
+
+
+pyspark.sql.SparkSession:
+---
+  + builder
+    + appName()
+    + config(key=None, value=Nonee, conf=None)
+    + master()
+    + getOrCreate()
+    + enableHiveSupport()
+  + createDataFrame(data, schema=None, samplingRatio=Nove, verifySchema=True)
+    Note: data can be an RDD, or list, pandas.DataFrame
+  + newSession()
+    stop()
+  + range(start, end=None, step=1, numPArtitions=None)
+    Note: if only one argument is specified, it will be used as the `end` value
+      testing DF-API functions: spark.range(1).select('...').show()
+  + sql(sqlQuery)
+      testing Spark SQL builtin functions: spark.sql('select ...').show()
+  + table(tableName): returns the table name as a dataframe
+  + read
+    readStream
+  + conf
+    SparkContext
+    stream
+    udf
+
+
+
+pyspark.sql.Row: 
+---
++ pyspark.sql.Row (only one method)
+  + asDict(recursive=False)
+  + Row object is immutable and can NOT change key/value pairs
+    use dict comprehension to create new Row object instead
+
+      key_list= ['k1', 'k2', 'k3']
+      row = Row(k1=1, k2=2)
+      Row(**dict([ (k, row.asDict().get(k, None)) for k in key_list ]))
+      Row(**dict({ k:row.asDict().get(k, None) for k in key_list }))
+
+
+
+pyspark.sql.Column:
+---
+  + alias(*alias):                   *** can be more than one columns
+  + asc()
+    asc_null_first()
+    asc_null_last()
+    desc()
+    desc_null_first()
+    desc_null_last()
+  + between(lowerBound, upperBound): *** Both boundaries are inclusive and handle null values
+  + bitwiseAND()
+    bitwiseOR()
+    bitwiseXOR()
+  + cast(datatype), astype(datatype)
+  + contains(other)
+    startswith(other)
+    endswith(other):                 *** All three are based on a string match
+  + eqNullSafe(other)
+  + isNotNull()
+    isNull()
+    isin()
+  + like: follows `SQL-like` expression
+    rlike: follows `Regex-like` expression
+  + substr()
+  + when()
+    otherwise()
+    over()
+
+
+
+spark.sql.DataFrame:
+---
+  + agg()
+  + alias()
+  + describe(): compute basic stat for numeric and string columns
+    summary()
+    stat 
+    approxQuantile
+    count
+    cov(col1, col2)
+    corr(col1, col2)
+    freqItems(cols)
+    crosstab
+    cube
+  + cache()
+    persist()
+    unpersist()
+  + checkpoint
+    localCheckpoint
+  + coalesce(N)
+    repartition(N, *cols)
+    repartitonByRange(N, *cols)
+  + columns, colRegex(regex)
+  + first():   return a Row object
+    collect(): return a list of Row objects
+    head(N):   return a list of Row objects
+    take(N):   return a list of Row objects
+  + createGlobalTempView
+    createOrReplaceGlobalTempView
+    createOrReplaceTempView
+    createTempView
+  + crossJoin
+    join
+  + exceptAll(df2)
+    union(df2)
+    unionAll(df2)
+    unionByName(df2)
+    intersect(df2)
+    intersectAll(df2)
+    subtract(df2)
+  + drop(*cols)
+    dropDuplicates(subset=None), drop_duplicates
+    dropna()
+  + fillna()
+  + dtypes
+  + explain
+    printSchema
+    schema
+  + select
+    selectExpr
+    withColumn()
+    withColumnRenamed()
+    alias
+    filter, where
+    distinct
+    greoupBy, groupby
+    limit
+    show
+  + orderBy
+    sort
+    sortWithinPartitions
+  + foreach(f)
+    foreachPArtition(f)
+  + isLocal
+    isStreaming
+  + randomSplit
+    sample(withreplacement=False, fraction=[0,1], seed=None)
+    sampleBy(col, fractions, seed=None)    <-- withreplacement=False
+  + replace(to_replace, value=<>, subset=None): 
+    * Note: value and to_replace must have the same type, only available to numerics, booleans or strings
+            to_replace and value can be list, to_replace can be a dist when value is missing.
+  + rollup
+  + toDF()
+  + toJSON()
+  + toLocalIterator()
+  + toPandas()
+  + write, writeStream
+
+
+
+pyspark.sql.GroupedData
+---
+  + agg()
+  + apply(): only for Pandas udf
+  + avg(*col)
+    count()
+    max(*col)
+    min(*col)
+    mean(*col)
+    sum(*col)
+  + pivot(pivot_col, values=None)
+
+
+
+pyspark.sql.Window:
+---
+  + partitionBy(*cols)
+  + orderBy(*cols)
+  + rangeBetween(start, end)
+  + rowsBetween(start, end)
+    
+  Notes: 
+   (1) By default, when orderBy() is missing, an unbounded Window frame is used
+	 otherwise, a growing Window frame (Window.unboundedPreceding, currentRow)
+   (2) boundary start/end are both inclusive and are relative to the current row
+
+
+
+pyspark.sql.DataFrameReader:
+---
+spark.read
+  + option(key, value)
+  + options(**options)
+  + schema()
+  + format()
+    + csv():
+      + path: string, list of paths or RDD of string saving CSV rows
+      + schema
+ *    + sep: default ,
+      + encoding
+ *    + quote: default '"', if empty string, it uses 'u0000' (null character)
+ *    + escape: default \
+      + comment
+ *    + header: default false
+ *    + inferSchema
+      + enforceSchema:
+      + samplingRatio: to inferSchema, default 1.0
+ *    + multiLine: default false
+ *    + ignoreLeadingWhiteSpace: default true   <-- strip() to both column names and field values
+ *    + ignoreTrailingWhiteSpace: default true  <-- strip() to both column names and field values
+ *    + nullValue: default EMPTY string
+ *    + nanValue:
+      + positiveInf
+      + negativeInf
+      + emptyValue: default ""
+ *    + dateFormat: default yyyy-MM-dd
+ *    + timestampFormat: default yyyy-MM-dd'T'HH:mm:ss.SSSXXX
+      + maxColumns: default 20480
+      + maxCharsPerColumn: default unlimited
+      + mode: PERMISSIVE, DROPMALFORMATED, FAILFAST
+      + columnNameOfCorruptRecord: 
+      + charToEscapeQuoteEscaping: 
+    + json():
+      + path
+      + schema
+ *    + multiLine: default false
+ *    + lineSep: default `\r?\n`
+      + primitivesAsString: default false
+      + prefersDecimal: default false
+      + allowComments: default false
+ *    + allowUnquotedFieldNames: default false
+ *    + allowSingleQuotes: default true
+      + allowNumericLeadingZero: default false
+      + allowBackslashEscapingAnyCharacter: default false
+      + allowUnquotedControlChars:
+ *    + dateFormat: default yyyy-MM-dd
+ *    + timestampFormat: default yyyy-MM-dd'T'HH:mm:ss.SSSXXX
+      + mode: PERMISSIVE, DROPMALFORMATED, FAILFAST
+      + columnNameOfCorruptRecord:
+      + encoding:
+      + samplingRatio: default 1.0
+      + dropFieldIfAllNull: default false
+    + jdbc():
+    + orc():
+    + parquet():
+    + text():
+  + format with plugins:
+    + avro():
+    + xml():
+      
+  + load():
+    * parameters: path, format, schema, options
+  + table()
+
+  Notes:
+  (1) json file can use single quotes(by default), no quotes(allowUnquotedFieldNames)
+  (2) csv file sep must be single-char delimiter, for multi-char or regex, might have to go through RDD methods
+  (3) mode=FAILFAST might not work as expected
+
+
+
+pyspark.sql.DataFrameWriter:
+---
+spark.write
+  + mode():
+    * append, overwrite, error/errorifexists, ignore
+  + option(key, value)
+  + options(**options)
+  + partitionBy(*col)
+  + format():
+    + csv()
+      + path
+ *    + mode: append, overwrite, ignore, error(default)
+      + compression: none, bzip2, gzip, lz4, snappy and deflate
+ *    + sep: default ,
+ *    + quote: default '"', if empty string, it uses 'u0000' (null character)
+ *    + escape: default \
+      + escapeQuotes:
+      + quoteAll:
+ *    + header: default false
+ *    + nullValue: default EMPTY string
+ *    + dateFormat: default yyyy-MM-dd
+ *    + timestampFormat: default yyyy-MM-dd'T'HH:mm:ss.SSSXXX
+ *    + ignoreLeadingWhiteSpace: default true   <-- strip() to both column names and field values
+ *    + ignoreTrailingWhiteSpace: default true  <-- strip() to both column names and field values
+      + charToEscapeQuoteEscaping: 
+      + encoding:
+      + emptyValue: default ""
+    + jdbc()
+      + url: example jdbc:mysql://127.0.1:3305/warehouse
+      + table
+      + mode
+      + properties: JDBC connection arguments: user, password etc
+    + json()
+      + path
+      + mode
+      + compression
+      + dateFormat
+      + timestampFormat
+      + encoding
+      + lineSep
+    + orc(path, mode, partitonBy, compression)
+    + parquet(path, mode, partitonBy, compression)
+    + text(path, compression, lineSep): 
+      the DF must have only one column that is StringType()
+  + save():
+    * parameters: path, format, mode, partitionBy and options
+  + insertInto(tableName, overwrite=False)
+  + bucketBy(numBuckets, col, *cols)
+    * Note: applicable for file-based data sources using saveAsTable()
+  + sortBy(*col)
+    * sort the output in each bucket by the given cols
+  + saveAsTable(tableName, format, mode, partitonBy, options)
+
+
+
+
+pyspark.sql.UDFRegistration
+---
+  + register(name, f, returnType=None)
+    * Python-based user-define function
+  + registerJavaFunction(name, javaClassName, returnType=None)   <-- from spark v2.3
+    * Java user-defined function as SQL function, can be Scala udf
+  + registerJavaUDAF(name, javaClassName)      <-- from sparn v2.3
+    * java-based aggregate function
+
+  Notes: 
+  (1) accessed by spark.udf or sqlContext.udf
+  (2) functions only available in SQL context, i.e. selectExpr() 
+
+
+
+pyspark.sql.types:
+---
+  + NullType()                          <-- Not a Numeric type
+  + StringType()                        <-- Not a Numeric type
+  + BinaryType()                        <-- Not a Numeric type
+  + BooleanType()                       <-- Not a Numeric type
+  + DateType()                          <-- Not a Numeric type 
+  + TimeStampType()                     <-- Not a Numeric type
+  + DecimalType(precision=10, scale=0)
+    DoubleType()
+    FloatType()
+    ByteType()
+    IntegerType()
+    LongType()
+    ShortType()
+  + ArrayType(elementType, containsNull=True)
+  + MapType(keyType, valueType, valueContainsNull=True)
+  + StructField(name,dataType,nullable=True,metadata=None)
+  + StructType(fields=None)
+    + add(field, data_type=None, nullable=True, metadata=None)
+      new_schema = schema.add('new_field', LongType())
+    + fieldNames(): returns all field names in a list
+
+  Note: 
+  (1) common methods to all DataType()
+      + json() <-- JSON string
+      + jsonValue()  <-- Python object
+      + simpleString()  
+      + fromInternal() convert between internal SQL object to native Python object.
+        toInternal()
+        needConversion()  <-- check if From and To Internal have any differences
+
+  (2) common to MapType(), ArrayType(), StructField() and StructType()
+      + fromJson()    <-- classmethod
+
+  (3) Mapping Python types from/to Spark SQL DataType
+      Reference: https://spark.apache.org/docs/2.4.4/api/python/_modules/pyspark/sql/types.html
+
+      _type_mappings = {
+          type(None): NullType,
+          bool: BooleanType,
+          int: LongType,
+          float: DoubleType,
+          str: StringType,
+          bytearray: BinaryType,
+          decimal.Decimal: DecimalType,
+          datetime.date: DateType,
+          datetime.datetime: TimestampType,
+          datetime.time: TimestampType,
+      }
+
+      _acceptable_types = {
+          BooleanType: (bool,),
+          ByteType: (int, long),
+          ShortType: (int, long),
+          IntegerType: (int, long),
+          LongType: (int, long),
+          FloatType: (float,),
+          DoubleType: (float,),
+          DecimalType: (decimal.Decimal,),
+          StringType: (str, unicode),
+          BinaryType: (bytearray,),
+          DateType: (datetime.date, datetime.datetime),
+          TimestampType: (datetime.datetime,),
+          ArrayType: (list, tuple, array),
+          MapType: (dict,),
+          StructType: (tuple, list, dict),
+      }
+
+   (4) BinaryType() is byteArray, you can access it through substr(barr,1,1), not `barr[0]`
+       , the result of `substr(barr,1,1)` is still a BinaryType(), not ByteType()
+
+    spark.sql("select binary('test')").show()   --> [74 65 73 74]
+
