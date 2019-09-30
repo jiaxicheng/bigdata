@@ -4,7 +4,22 @@ Functions in DataFrame API, but not in SparkSQL:
 ---
  + udf, pandas_udf
  + broadcast, lit, expr, col, column
- + asc, asc_nulls_first, asc_nulls_last, desc, desc_nulls_first, desc_nulls_last
+
+
+Functions in DataFrame API, can be handled in SparkSQL
+ + asc_nulls_first, asc_nulls_last, desc_nulls_first, desc_nulls_last
+   Spark SQL does not support `Order BY col ASC null first` etc
+   adding a reference column IF(col is null,1,0) in order By clause of Spark SQL
+   Spark SQL default: null is the smallest in ordering
+
+    spark.sql("""
+
+        SELECT c1 FROM VALUES (1), (NULL), (12), (3) AS (c1)
+        ORDER BY IF(isnull(c1),1,0), c1 ASC
+
+    """).show()
+
+    Ref: SparkSQL Select: https://docs.databricks.com/spark/latest/spark-sql/language-manual/select.html#
 
 
 Functions only in Spark SQL, not in DataFrame API
@@ -12,34 +27,44 @@ Functions only in Spark SQL, not in DataFrame API
  + higher-order functions: transform, exists, filter, aggregate, zip_with
  + XML related: xpath, xpath_boolean, xpath_double, xpath_float, xpath_int
               , xpath_long, xpath_number, xpath_short, xpath_string
+ + parse_url: similar to XML pather, this can retrieve HOST, QUERY etc from a valid URL
  + inline, inline_outer: similar to explode, explode_outer (array of structs)
    (explode + dereference) should be used with select/selectExpr
    withColumn will not working when multiple fields exist in structs
  + named_struct: like struct, map, array, very useful
  + str_to_map: like split, but create a MapType() from string
+ + percentile: can be used to calculate exact median
  + stack: can be used to demornalize a df
  + find_in_set: 
  + sentences: split paragraph into array of arrays (sentences of words)
- + percentile: can be used to calculate median
  + elt: similar to choose() in Pentaho
+ + java_method, reflect: only applied to static method from Java/Scala
+   ref: https://jaceklaskowski.gitbooks.io/mastering-spark-sql/spark-sql-Expression-CallMethodViaReflection.html
  + other less used:
    + nvl, nvl2, nullif, not, isnotnull
    + cube, cot, e, pi, ln, std, power, sign, mod, pmod, negative, positive, count_min_sketch
-   + day, weekday, now, to_unix_timestamp
    + space, chr, binary, char, bit_length, char_length, character_length, octet_length
-   + parse_url
    + current_database, input_file_block_length, input_file_block_start
-   + java_method, cardinality, assert_true, rollup, reflect, uuid
+   + cardinality, assert_true, uuid
 
 
 Functions only in SparkSQL which can be simulated with DF API:
 ---
  + if,ifnull ->  df:{when,otherwise}
- + left, right -> sql:substring  left(A,2) -> substring('A',1,2)  right(A,2) -> substring('A',-2,2)
- + position -> sql:{instr,locate}
- + replace -> sql:regexp_replace
- + printf -> sql:format_string
+ + left, right -> df:substring  left(A,2) -> substring('A',1,2)  right(A,2) -> substring('A',-2,2)
+ + position -> df:{instr,locate}
+ + printf -> df:format_string
+ + replace -> df:regexp_replace, df.replace
+ + rollup -> df.rollup
  + like -> df.rlike
+
+
+Duplicated functions only in SparkSQL to compatible with Standard SQL:
+---
+ + to_unix_timestamp -> {df,sql}:unix_timestamp 
+ + now -> {df,sql}:current_timestamp
+ + weekday -> {df,sql}:dayofweek
+ + day -> {df,sql}:dayofmonth
 
 
 Exist in both but using different names:
@@ -61,6 +86,8 @@ Exist in both but work differently
    many of the DF-API functions only support scalar argument, i.e. date_add(d, N)
    the 2nd argument must be an integer, in Spark SQL, this can be a column. This makes
    SparkSQL more powerful.
+ + sequence() in DF-API support only integers, while date, timestamp and byte 
+   are supported with Spark SQL (extra power)
 
 
 Some notes:
@@ -71,4 +98,7 @@ Some notes:
       , but not for API functions
 
   (2) in DF-API, logic '|', '&', but in SQL, need 'or', 'and'
+
+
+
 
