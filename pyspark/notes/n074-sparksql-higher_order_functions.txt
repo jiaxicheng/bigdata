@@ -1,0 +1,66 @@
+Some applications with Spark SQL higher-order functions:
+
+from pyspark.sql.functions import expr
+
+(1) transform | zip_with:
+https://stackoverflow.com/questions/57811151/how-to-concat-corresponding-elements-of-two-arrays-in-pypspark-dataframe-with-sp
+
+join and merge cols1 and col2 into col3, see below:
+
+    df.withColumn('col3', expr("
+            array_join(
+                transform(sequence(0, size(col1)-1), i -> CONCAT(col1[i], ':', col2[i]))
+              , '_'
+            )
+      ")).show()
+    +------+----------+-----------+
+    |  col1|      col2|       col3|
+    +------+----------+-----------+
+    |[1, 2]|[ABC, DEF]|1:ABC_2:DEF|
+    +------+----------+-----------+
+
+Another way: using `zip_with()` to replace `transform() + sequence()`
+
+    zip_with(col1, col2, (x,y) -> concat(x,':',y))
+
+
+(2) filter:
+https://stackoverflow.com/questions/58099344/filter-json-array-data-in-spark-dataframe
+
+keep only recipients which has code == user1 (recipients field is an array of MapType()/StructType())
+
+    df = spark.createDataFrame([
+        ("4f19-9deb-0ef861c1a6a1",[
+             {"account":"45678765457876545678","code":"user1","status":"pending"}
+           , {"account":"12354567897545678","code":"error2","status":"pending"}]
+        ),  
+        ("09ad-451e-8fb1-50bc185ef02f",[
+             {"account":"4567654567876545678","code":"user3","status":"pending"}
+           , {"account":"12354567876545678","code":"user2","status":"pending"}]
+        )], ["lot_number", "recipients"] 
+    )
+
+    df.withColumn('recipients', expr("filter(recipients, x -> x.code = 'user1')")) \
+      .where('size(recipients) > 0') \
+      .show(truncate=False)
+    +----------------------+---------------------------------------------------------------------+
+    |lot_number            |recipients                                                           |
+    +----------------------+---------------------------------------------------------------------+
+    |4f19-9deb-0ef861c1a6a1|[[code -> user1, account -> 45678765457876545678, status -> pending]]|
+    +----------------------+---------------------------------------------------------------------+
+
+
+(3) transform with MapType()
+https://stackoverflow.com/questions/58156078/pyspark-compare-empty-map-literal/58156434?noredirect=1#comment102702298_58156434
+
+    concatenate map key and their corresponding values:
+ 
+    df.withColumn('m2', F.expr("transform(array_sort(map_keys(m1)), k -> concat_ws('|', k, map[k]))")) \
+      .show(truncate=False)
+    +---+------------------------+---------------+
+    |key|m1                      |m2             |
+    +---+------------------------+---------------+
+    |2  |[1 -> A, 2 -> C, 3 -> B]|[1|A, 2|C, 3|B]|
+    |3  |[1 -> A, 2 -> B]        |[1|A, 2|B]     |
+    +---+------------------------+---------------+
+
