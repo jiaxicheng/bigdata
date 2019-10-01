@@ -38,25 +38,35 @@ Functions only in Spark SQL, not in DataFrame API
  + find_in_set: 
  + sentences: split paragraph into array of arrays (sentences of words)
  + elt: similar to choose() in Pentaho
- + java_method, reflect: only applied to static method from Java/Scala
-   ref: https://jaceklaskowski.gitbooks.io/mastering-spark-sql/spark-sql-Expression-CallMethodViaReflection.html
- + other less used:
-   + nvl, nvl2, nullif, not, isnotnull
-   + cube, cot, e, pi, ln, std, power, sign, mod, pmod, negative, positive, count_min_sketch
-   + space, chr, binary, char, bit_length, char_length, character_length, octet_length
-   + current_database, input_file_block_length, input_file_block_start
-   + cardinality, assert_true, uuid
+ + java_method, reflect: only applied to static method from Java/Scala [1]
+ + functions from Apache Hive:
+   + all functions mentioned above except the higher-order functions
+   + pmod, e, negative, positive, space, assert_true
+   + current_database
+   + char_length, character_length, octet_length
+ + not from Apache Hive: 
+   + bit_length
+   + count_min_sketch
+   + uuid
+   + input_file_block_start, input_file_block_length
 
 
 Functions only in SparkSQL which can be simulated with DF API:
 ---
- + if,ifnull ->  df:{when,otherwise}
+ + if,ifnull,nvl,nvl2,nullif ->  df:{when,otherwise}
  + left, right -> df:substring  left(A,2) -> substring('A',1,2)  right(A,2) -> substring('A',-2,2)
  + position -> df:{instr,locate}
  + printf -> df:format_string
  + replace -> df:regexp_replace, df.replace
  + rollup -> df.rollup
  + like -> df.rlike
+ + isnotnull -> df.col.isNotNull()
+ + cube -> df.cube
+ + cardinality -> df:approx_count_distinct
+ + char,chr -> df:hex+unhex+astype, example
+     spark.range(1).select(F.unhex(F.hex(F.lit(65))).astype('string')) == spark.sql('select chr(65)')
+ + cot -> df:1/tan
+ + pi -> df:2*asin(1)
 
 
 Duplicated functions only in SparkSQL to compatible with Standard SQL:
@@ -65,6 +75,11 @@ Duplicated functions only in SparkSQL to compatible with Standard SQL:
  + now -> {df,sql}:current_timestamp
  + weekday -> {df,sql}:dayofweek
  + day -> {df,sql}:dayofmonth
+ + std -> {df,sql}:stdev
+ + sign -> {df,sql}:signum
+ + ln -> {df,sql}:log (with one argument)
+ + power -> {df,sql}:pow
+ + mod -> {df,sql}:% 
 
 
 Exist in both but using different names:
@@ -74,7 +89,7 @@ Exist in both but using different names:
  + df:countDistince -> sql:count(distinct ..)
  + df:sumDistinct  -> sql:sum(distinct ..)
  + df.approxQuantile(col, probabilities, relativeError) -> sql:{approx_percentile,percentile_approx}
- + df:astype -> sql:{cast,int,bigint,boolean,decimal,double,date,float,string,timestamp,tinyint,smallint}
+ + df:astype -> sql:{cast,int,bigint,boolean,decimal,double,date,float,string,timestamp,tinyint,smallint,binary}
 
 
 Exist in both but work differently
@@ -100,5 +115,6 @@ Some notes:
   (2) in DF-API, logic '|', '&', but in SQL, need 'or', 'and'
 
 
-
-
+References:
+[1] Java_Method: https://jaceklaskowski.gitbooks.io/mastering-spark-sql/spark-sql-Expression-CallMethodViaReflection.html
+[2] Apache_Hive_functions: https://cwiki.apache.org/confluence/display/Hive/LanguageManual+UDF
