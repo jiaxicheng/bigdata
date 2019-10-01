@@ -6,6 +6,15 @@ current pyspark.sql library:
 
 pyspark.sql.SparkSession:
 ---
+  + properties:
+    + conf
+    + catalog
+    + SparkContext
+    + streams
+    + read
+    + readStream
+    + udf
+    + version
   + builder
     + appName()
     + config(key=None, value=Nonee, conf=None)
@@ -14,34 +23,28 @@ pyspark.sql.SparkSession:
     + enableHiveSupport()
   + createDataFrame(data, schema=None, samplingRatio=Nove, verifySchema=True)
     Note: data can be an RDD, or list, pandas.DataFrame
-  + newSession()
-    stop()
   + range(start, end=None, step=1, numPArtitions=None)
     Note: if only one argument is specified, it will be used as the `end` value
       testing DF-API functions: spark.range(1).select('...').show()
   + sql(sqlQuery)
       testing Spark SQL builtin functions: spark.sql('select ...').show()
   + table(tableName): returns the table name as a dataframe
-  + read
-    readStream
-  + conf
-    SparkContext
-    stream
-    udf
+  + newSession()
+    stop()
 
 
 
 pyspark.sql.Row: 
 ---
-+ pyspark.sql.Row (only one method)
   + asDict(recursive=False)
-  + Row object is immutable and can NOT change key/value pairs
-    use dict comprehension to create new Row object instead
 
-      key_list= ['k1', 'k2', 'k3']
-      row = Row(k1=1, k2=2)
-      Row(**dict([ (k, row.asDict().get(k, None)) for k in key_list ]))
-      Row(**dict({ k:row.asDict().get(k, None) for k in key_list }))
+    Note:  Row object is immutable and can NOT change key/value pairs
+           use dict comprehension to create new Row object instead
+
+        key_list= ['k1', 'k2', 'k3']
+        row = Row(k1=1, k2=2)
+        Row(**dict([ (k, row.asDict().get(k, None)) for k in key_list ]))
+        Row(**dict({ k:row.asDict().get(k, None) for k in key_list }))
 
 
 
@@ -49,15 +52,15 @@ pyspark.sql.Column:
 ---
   + alias(*alias):                   *** can be more than one columns
   + asc()
-    asc_null_first()
+    asc_null_first()  spark v2.4+
     asc_null_last()
     desc()
     desc_null_first()
     desc_null_last()
   + between(lowerBound, upperBound): *** Both boundaries are inclusive and handle null values
-  + bitwiseAND()
-    bitwiseOR()
-    bitwiseXOR()
+  + bitwiseAND(other)
+    bitwiseOR(other)
+    bitwiseXOR(other)
   + cast(datatype), astype(datatype)
   + contains(other)
     startswith(other)
@@ -66,99 +69,107 @@ pyspark.sql.Column:
   + isNotNull()
     isNull()
     isin()
-  + like: follows `SQL-like` expression
-    rlike: follows `Regex-like` expression
-  + substr()
-  + when()
-    otherwise()
-    over()
+  + like(sql_like): follows `SQL-like` expression
+    rlike(regex): follows `Regex-like` expression
+  + substr(startPos, length)
+  + when(cond, value)
+    otherwise(value)
+    over(win_spec)
+  + getField(name): get a field by name in a StructField
+    getItem(key)
 
 
 
 spark.sql.DataFrame:
 ---
-  + agg()
-  + alias()
-  + describe(): compute basic stat for numeric and string columns
-    summary()
-    stat 
-    approxQuantile
-    count
-    cov(col1, col2)
-    corr(col1, col2)
-    freqItems(cols)
-    crosstab
-    cube
-  + cache()
-    persist()
-    unpersist()
-  + checkpoint
-    localCheckpoint
-  + coalesce(N)
-    repartition(N, *cols)
-    repartitonByRange(N, *cols)
-  + columns, colRegex(regex)
+  + properties:
+    + dtypes
+    + columns
+    + schema
+    + rdd
+    + stat
+    + na
+    + storageLevel 
+    + write
+    + writeStream
+    + isStreaming
+  + explain(extended=False)
+    printSchema()
+    hint(name, *param)  <-- version 2.2+
+    isLocal()
   + first():   return a Row object
     collect(): return a list of Row objects
     head(N):   return a list of Row objects
     take(N):   return a list of Row objects
-  + createGlobalTempView
-    createOrReplaceGlobalTempView
-    createOrReplaceTempView
-    createTempView
-  + crossJoin
-    join
-  + exceptAll(df2)
+    show(N=20, truncate=False, vertical=False)
+  + colRegex(regex)
+  + crossJoin(df2)
+    join(df2, on=None, how='inner')
+    exceptAll(df2)
     union(df2)
     unionAll(df2)
     unionByName(df2)
     intersect(df2)
     intersectAll(df2)
     subtract(df2)
-  + drop(*cols)
-    dropDuplicates(subset=None), drop_duplicates
-    dropna()
-  + fillna()
-  + dtypes
-  + explain
-    printSchema
-    schema
-  + select
-    selectExpr
+  + select(*cols)
+    selectExpr(*expr)
     withColumn()
     withColumnRenamed()
-    alias
-    filter, where
-    distinct
-    greoupBy, groupby
-    limit
-    show
-  + orderBy
-    sort
+    alias(alias)
+    filter(cond), where(cond)
+    distinct()
+    greoupBy(*col), groupby(*col)
+    limit(N)
+  + orderBy(*col)
+    sort(*col)
     sortWithinPartitions
   + foreach(f)
     foreachPArtition(f)
-  + isLocal
-    isStreaming
-  + randomSplit
-    sample(withreplacement=False, fraction=[0,1], seed=None)
-    sampleBy(col, fractions, seed=None)    <-- withreplacement=False
+  + drop(*cols)
+    dropDuplicates(subset=None)  same to drop_duplicates
+    dropna(how='any', thresh=None, subset=None)
+  + fillna(value, subset=None)
+  + describe(): compute basic stat for numeric and string columns
+    summary()
+    agg(*expr)
+    approxQuantile(col, probablities, relativeError)
+    count()
+    cov(col1, col2)
+    corr(col1, col2, method=None)
+    freqItems(cols, support=None)
+    crosstab(col1, col2)
+    cube(*col)
+    rollup(*col)
   + replace(to_replace, value=<>, subset=None): 
     * Note: value and to_replace must have the same type, only available to numerics, booleans or strings
             to_replace and value can be list, to_replace can be a dist when value is missing.
-  + rollup
+  + coalesce(N)
+    repartition(N, *cols)
+    repartitonByRange(N, *cols)
+  + cache()
+    persist(storageLevel=StorageLEvel(True,True,False,False,1))
+    unpersist()
+  + checkpoint()
+    localCheckpoint()
+  + createGlobalTempView(name)
+    createOrReplaceGlobalTempView(name)
+    createOrReplaceTempView(name)
+    createTempView(name)
+  + randomSplit(weights, seed=None)
+    sample(withreplacement=False, fraction=[0,1], seed=None)
+    sampleBy(col, fractions, seed=None)    <-- withreplacement=False
   + toDF()
-  + toJSON()
-  + toLocalIterator()
-  + toPandas()
-  + write, writeStream
+    toJSON()
+    toLocalIterator()
+    toPandas()
 
 
 
 pyspark.sql.GroupedData
 ---
-  + agg()
-  + apply(): only for Pandas udf
+  + agg(*exprs)
+  + apply(pandas_udf)
   + avg(*col)
     count()
     max(*col)
@@ -256,10 +267,12 @@ spark.read
       + pyspark --packages org.apache.spark:spark-avro_2.11:2.4.0
     + xml: 
       + spark-xml: https://github.com/databricks/spark-xml#python-api
-      
+    + bigquery: (untested)
+      + https://github.com/GoogleCloudPlatform/spark-bigquery-connector
   + load():
     * parameters: path, format, schema, options
-  + table()
+  + table(tbl_name)
+    * return `tbl_name` as a dataframe
 
   Notes:
   (1) JSON file can use single quotes(by default), no quotes(allowUnquotedFieldNames)
@@ -420,5 +433,11 @@ pyspark.sql.types:
    (4) BinaryType() is byteArray, you can access it through substr(barr,1,1), not `barr[0]`
        , the result of `substr(barr,1,1)` is still a BinaryType(), not ByteType()
 
-    spark.sql("select binary('test')").show()   --> [74 65 73 74]
+        spark.sql("select binary('test')").show()   --> [74 65 73 74]
+
+
+   (5) DataTypes for columns can be retrieved from df.schema.jsonValues() into a dictionary:
+
+        field_dtypes = { f['name']:f['type'] for f in df.schema.jsonValue()['fields'] }
+
 
