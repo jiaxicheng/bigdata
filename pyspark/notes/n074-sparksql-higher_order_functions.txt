@@ -7,7 +7,7 @@ https://stackoverflow.com/questions/57811151/how-to-concat-corresponding-element
 
 join and merge cols1 and col2 into col3, see below:
 
-    df.withColumn('col3', expr("
+    >>> df.withColumn('col3', expr("
             array_join(
                 transform(sequence(0, size(col1)-1), i -> CONCAT(col1[i], ':', col2[i]))
               , '_'
@@ -29,7 +29,7 @@ https://stackoverflow.com/questions/58099344/filter-json-array-data-in-spark-dat
 
 keep only recipients which has code == user1 (recipients field is an array of MapType()/StructType())
 
-    df = spark.createDataFrame([
+    >>> df = spark.createDataFrame([
         ("4f19-9deb-0ef861c1a6a1",[
              {"account":"45678765457876545678","code":"user1","status":"pending"}
            , {"account":"12354567897545678","code":"error2","status":"pending"}]
@@ -40,9 +40,9 @@ keep only recipients which has code == user1 (recipients field is an array of Ma
         )], ["lot_number", "recipients"] 
     )
 
-    df.withColumn('recipients', expr("filter(recipients, x -> x.code = 'user1')")) \
-      .where('size(recipients) > 0') \
-      .show(truncate=False)
+    >>> df.withColumn('recipients', expr("filter(recipients, x -> x.code = 'user1')")) \
+          .where('size(recipients) > 0') \
+          .show(truncate=False)
     +----------------------+---------------------------------------------------------------------+
     |lot_number            |recipients                                                           |
     +----------------------+---------------------------------------------------------------------+
@@ -55,8 +55,8 @@ https://stackoverflow.com/questions/58156078/pyspark-compare-empty-map-literal/5
 
     concatenate map_keys and their corresponding values:
  
-    df.withColumn('m2', F.expr("transform(array_sort(map_keys(m1)), k -> concat_ws('|', k, m1[k]))")) \
-      .show(truncate=False)
+    >>> df.withColumn('m2', F.expr("transform(array_sort(map_keys(m1)), k -> concat_ws('|', k, m1[k]))")) \
+          .show(truncate=False)
     +---+------------------------+---------------+
     |key|m1                      |m2             |
     +---+------------------------+---------------+
@@ -65,9 +65,9 @@ https://stackoverflow.com/questions/58156078/pyspark-compare-empty-map-literal/5
     +---+------------------------+---------------+
 
 
-    df.withColumn('m2', F.expr("map(bigint(1),'A' , bigint(2),'B')")) \
-      .withColumn('f1', F.expr("exists(map_keys(m2), k -> (m2[k] != m1[k]) or (m1[k] is null))")) \
-      .show()
+    >>> df.withColumn('m2', F.expr("map(bigint(1),'A' , bigint(2),'B')")) \
+          .withColumn('f1', F.expr("exists(map_keys(m2), k -> (m2[k] != m1[k]) or (m1[k] is null))")) \
+          .show()
     +---+--------------------+----------------+-----+
     |key|                  m1|              m2|   f1|
     +---+--------------------+----------------+-----+
@@ -84,5 +84,25 @@ https://stackoverflow.com/questions/58156078/pyspark-compare-empty-map-literal/5
 
     Note: Spark MapType() can contains duplicates keys, this could make things complex, but since the OP's dict 
           mapping is in Python which does not allow duplicate keys, thus we can skip this issue here.
+
+
+(4) differences between array_except and filter
+
+    Notes: array_except(a1, a2) will create a new array with element in a1 but not in a2, the resulting array
+           will drop duplicates as a side-effect. this might not be what you are looking for. if you want to
+           keep duplicates in the original array a1, then use filter:
+
+    >>> from pyspark.sql.functions import array_except, expr
+
+    >>> df = spark.createDataFrame([(["10","20","30","30"],["10","20"])],["age","id"])
+
+    >>> df.withColumn('c1', F.array_except('age', 'id')) \
+          .withColumn('c2', F.expr("filter(age, x -> !array_contains(id, x))")) \
+          .show()
+    +----------------+--------+----+--------+
+    |             age|      id|  c1|      c2|
+    +----------------+--------+----+--------+
+    |[10, 20, 30, 30]|[10, 20]|[30]|[30, 30]|
+    +----------------+--------+----+--------+
 
 
