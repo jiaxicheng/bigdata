@@ -50,17 +50,39 @@ keep only recipients which has code == user1 (recipients field is an array of Ma
     +----------------------+---------------------------------------------------------------------+
 
 
-(3) transform with MapType()
+(3) transform with MapType() + using exists()
 https://stackoverflow.com/questions/58156078/pyspark-compare-empty-map-literal/58156434?noredirect=1#comment102702298_58156434
 
-    concatenate map key and their corresponding values:
+    concatenate map_keys and their corresponding values:
  
-    df.withColumn('m2', F.expr("transform(array_sort(map_keys(m1)), k -> concat_ws('|', k, map[k]))")) \
+    df.withColumn('m2', F.expr("transform(array_sort(map_keys(m1)), k -> concat_ws('|', k, m1[k]))")) \
       .show(truncate=False)
     +---+------------------------+---------------+
     |key|m1                      |m2             |
     +---+------------------------+---------------+
-    |2  |[1 -> A, 2 -> C, 3 -> B]|[1|A, 2|C, 3|B]|
+    |2  |[1 -> A, 2 -> B, 3 -> C]|[1|A, 2|B, 3|C]|
     |3  |[1 -> A, 2 -> B]        |[1|A, 2|B]     |
     +---+------------------------+---------------+
+
+
+    df.withColumn('m2', F.expr("map(bigint(1),'A' , bigint(2),'B')")) \
+      .withColumn('f1', F.expr("exists(map_keys(m2), k -> (m2[k] != m1[k]) or (m1[k] is null))")) \
+      .show()
+    +---+--------------------+----------------+-----+
+    |key|                  m1|              m2|   f1|
+    +---+--------------------+----------------+-----+
+    |  1|                  []|[1 -> A, 2 -> B]| true|
+    |  2|[1 -> A, 2 -> B, ...|[1 -> A, 2 -> B]|false|
+    |  3|    [1 -> A, 2 -> B]|[1 -> A, 2 -> B]|false|
+    +---+--------------------+----------------+-----+
+
+    After we make sure all key/value in m2 are exists and same in m1, we will need to compare the size of two maps
+    only if it's the same, we can make sure two maps are the same. asume we saved the above transformation pipeline 
+    into df1, then
+
+        df1.filter('!f1 and size(m1) == size(m2)').show()
+
+    Note: Spark MapType() can contains duplicates keys, this could make things complex, but since the OP's dict 
+          mapping is in Python which does not allow duplicate keys, thus we can skip this issue here.
+
 
