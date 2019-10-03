@@ -160,7 +160,7 @@ spark.sql.DataFrame:
     sample(withreplacement=False, fraction=[0,1], seed=None)
     sampleBy(col, fractions, seed=None)    <-- withreplacement=False
   + toDF()
-    toJSON()
+    toJSON(): return RDD of JSONs
     toLocalIterator()
     toPandas()
 
@@ -438,6 +438,19 @@ pyspark.sql.types:
 
    (5) DataTypes for columns can be retrieved from df.schema.jsonValues() into a dictionary:
 
-        field_dtypes = { f['name']:f['type'] for f in df.schema.jsonValue()['fields'] }
+       Example-1: mapping between column name and corresponding data-type
+
+           field_dtypes = { f['name']:f['type'] for f in df.schema.jsonValue()['fields'] }
+
+       Example-2: mapping between StructType() columns with corresponding fields(in a list)
+       https://stackoverflow.com/questions/58219205
+
+           struct_fields_mapping = { 
+                f['name']:[i['name'] for i in f['type']['fields']] 
+                    for f in df.schema.jsonValue()['fields'] 
+                    if type(f['type']) is dict and f['type']['type'] == 'struct' 
+           }
+
+
 
 
