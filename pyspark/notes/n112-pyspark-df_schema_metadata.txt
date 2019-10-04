@@ -1,0 +1,122 @@
+Using the metadata from df.schema:
+
+to adjust, convert or save the data-type definitions of the fields or the whole data frame:
+
+
+df.schema:
+---
+  + prperties:
+    + names: same as df.columns
+    + fields: returns a list: [StructField(id,IntegerType,true), StructField(date_purchased,DateType,true)]
+  + class_method:
+    + fromJson(): 
+      specify the DataType using a JSON value(must be a dict). for example:
+
+          col_dtype = StructType.fromJson(json_value)
+
+  + instance_method:
+    + add(): Add a new StructField() to the exist StructType()
+    + fieldNames():  same as df.columns
+    + simpleString():  
+      + return a string: 'struct<id:int,email:string,date_purchased:date>'
+    + json():
+      + put the DataType() metadata into a JSON string
+    + jsonValue():
+      + put the DataType() metadata into a JSON Value which is a Python object
+    + fromInternal(), toInternal(), needConversion()
+      + three are connected, use-case is limited, only DateType, TimeStampType might be useful
+        most of simple DataType has needConversion() == False
+    + typeName(): it almost always returns 'struct'
+
+Notes:
+ (1) the return of df.schema.jsonValue() is an Python object which can be very useful to 
+     programmingly retrieve metadata of all column information in the dataframe
+     including dtypes, field_name of StructType() columns
+ (2) fromJson() class method can be used to reassign the dtype of a compound datatype,
+     StructType, ArrayType etc
+ (3) _parse_datetype_string() for class:`DataType.simpleString`
+     + since spark 2.3, this also support a schema in a DDL-formatted string
+       "a DOUBLE, b STRING", "a:array<short>", "map<string,string>"
+     + case-insensitive
+
+
+Example-1: using df.schema.jsonValue() to map column names with corresponding dataType which can be
+           used in cast()/astype(). using fromJson() classmethod for StructType, ArrayType etc. compound data types
+
+    field_dtypes = { f['name']:f['type'] for f in df.schema.jsonValue()['fields'] }       
+
+
+Example-2: Using df.schema.jsonValue() to retrieve all fields in a StructType() and flatten the fields:
+https://stackoverflow.com/questions/58219205/how-to-move-all-json-structs-up-one-level-convert-all-json-structs-to-strings
+
+    struct_fields_mapping = { 
+            f['name']:[i['name'] for i in f['type']['fields']] 
+                for f in df.schema.jsonValue()['fields'] 
+                if type(f['type']) is dict and f['type']['type'] == 'struct' 
+    }
+
+    >>> print(fields_mapping)
+    {'key 1': ['s'],
+     'key 2': ['n', 's'],
+     'key 3': ['n'],
+     'key 4': ['n', 's'],
+     'key 5': ['s']}
+
+
+Example-3: saving dataframe into CSV and keep the schema for data reloading
+
+    from pyspark.sql.functions import to_json, from_json
+    from pyspark.sql.types import ArrayType, StructType
+
+    df.printSchema()
+    root
+     |-- array_b: array (nullable = true)
+     |    |-- element: struct (containsNull = true)
+     |    |    |-- a: string (nullable = true)
+     |    |    |-- b: double (nullable = true)
+     |-- struct_c: struct (nullable = true)
+     |    |-- a: double (nullable = true)
+     |    |-- b: double (nullable = true)
+
+    # df.schema.jsonValue() saves the dataframe schema metadata in Python dict,
+    # the following dict_field_dtype will save each column and its dtype meta data
+    # in a dictionary
+    field_dtypes = { f['name']:f['type'] for f in df.schema.jsonValue()['fields'] }
+
+    # now convert array_b and struct_c into JSON and then save it into CSV file
+    df.withColumn('array_b', to_json('array_b')) \
+      .withColumn('struct_c', to_json('struct_c')) \
+      .coalesce(1).write.mode('overwrite') \
+      .csv('/path/to/csv', header=True)
+
+    # read the data back and recover their DataType
+    spark.read.csv('/path/to/csv', header=True) \
+         .withColumn('array_b', from_json('array_b', ArrayType.fromJson(field_dtypes['array_b']))) \
+         .withColumn('struct_c', from_json('struct_c', StructType.fromJson(field_dtypes['struct_c']))) \
+         .printSchema()
+    root
+     |-- array_b: array (nullable = true)
+     |    |-- element: struct (containsNull = true)
+     |    |    |-- a: string (nullable = true)
+     |    |    |-- b: double (nullable = true)
+     |-- struct_c: struct (nullable = true)
+     |    |-- a: double (nullable = true)
+     |    |-- b: double (nullable = true)
+
+
+
+Example-4: change DataType within a nested data column: below adjust struct_c.b from DoubleType() to StringType()
+
+    field_dtypes['struct_c']['fields'][1]['type'] = 'string'
+
+    df.withColumn('struct_c', from_json(to_json('struct_c'), StructType.fromJson(field_dtypes['struct_c']))) \
+      .printSchema()
+    root
+     |-- array_b: array (nullable = true)
+     |    |-- element: struct (containsNull = true)
+     |    |    |-- a: string (nullable = true)
+     |    |    |-- b: double (nullable = true)
+     |-- struct_c: struct (nullable = true)
+     |    |-- a: double (nullable = true)
+     |    |-- b: string (nullable = true)
+
