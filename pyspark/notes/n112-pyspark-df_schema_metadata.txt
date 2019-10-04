@@ -120,3 +120,24 @@ Example-4: change DataType within a nested data column: below adjust struct_c.b 
      |    |-- a: double (nullable = true)
      |    |-- b: string (nullable = true)
 
+
+Example-5: delete some fields in a column of complex data types. 
+
+    in the following example, delete array_b.a from the column array_b
+
+    similar post in SO: https://stackoverflow.com/questions/58243292
+
+    Method-1: using jsonValue()
+    f_array_b = field_dtypes['array_b']
+    f_array_b['elementType']['fields'] = [ f for f in f_array_b['elementType']['fields'] if f['name'] not in ('a') ]
+    new_schema = ArrayType.fromJson(f_array_b)
+
+    Method-2: A simpler way is just to modify df.schema.simpleString()
+    >>> df.select('array_b').schema.simpleString()
+    'struct<array_b:array<struct<a:string,b:double>>>'
+    >>> new_schema = 'array<struct<b:double>>'
+ 
+    After you have new_schema, adjust the data using to_json + from_json
+    df.withColumn('array_b', from_json(to_json('array_b'), new_schema))
+
+
