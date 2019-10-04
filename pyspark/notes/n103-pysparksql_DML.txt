@@ -1,0 +1,158 @@
+
+Some notes/collections about using the SparkSQL DML and their DataFrame API correspondences
+
+#==================================
+#          Spark SQL DML
+#==================================
+
+
++ SELECT:
+
+SELECT [hints, ...] [ALL|DISTINCT] named_expression[, named_expression, ...]
+  FROM relation[, relation, ...]
+  [lateral_view[, lateral_view, ...]]
+  [WHERE boolean_expression]
+  [aggregation [HAVING boolean_expression]]
+  [ORDER BY sort_expressions]
+  [CLUSTER BY expressions]
+  [DISTRIBUTE BY expressions]
+  [SORT BY sort_expressions]
+  [WINDOW named_window[, WINDOW named_window, ...]]
+  [LIMIT num_rows]
+
+
++ FROM:
+  + VALUES (this can not be used with JOIN)
+
+      SELECT id, code FROM VALUES (1, 'a'), (2, 'b'), (3, 'c') AS (id, code)
+
+  + LATERAL_VIEW
+
+      SELECT * FROM df_tbl LATERAL VIEW inline_outer(struct_c) my_view
+      SELECT struct_c.a, my_view.* FROM df_tbl LATERAL VIEW OUTER explode(array_b) my_view
+      
+
++ JOIN:
+---
+  + syntax:
+
+    relation join_type JOIN relation (ON boolean_expression | USING (column_name[, column_name, ...]))
+    relation NATURAL join_type JOIN relation
+  
+  + join_type:
+    + INNER
+    + (LEFT|RIGHT|FULL) OUTER
+    + (LEFT|RIGHT) SEMI: == exists
+    + LEFT ANTI: == not exists
+
+
++ Sampling:
+---
+  + syntax:
+
+      TABLESAMPLE ((integer_expression | decimal_expression) PERCENT)
+      TABLESAMPLE (integer_expression ROWS)
+
+  + examples:
+
+     SELECT * FROM df_tbl TABLESAMPLE (200 ROWS)
+     SELECT * FROM df_tbl TABLESAMPLE (10 PERCENT)
+
+
++ Aggregation:
+---
+  + syntax:
+
+    GROUP BY expressions [(WITH ROLLUP | WITH CUBE | GROUPING SETS (expressions))]
+
+  + ROLLUP
+       GROUP BY c1, c2 WITH ROLLUP
+     is the same as:
+       GROUP BY c1, c2 GROUPING SETS ((a,b), (a), ())
+  + CUBE
+       GROUP BY c1, c2 WITH CUBE
+     is the same as:
+       GROUP BY c1, c2 GROUPING SETS ((a,b), (a), (b), ())
+
+
+
++ Window Functions:
+---
+  + Window Spec: (below two same) 
+    + Partition By Expression Order By sort_expression [frame_bound]
+      Distribute By expression Sort By sort_expression [frame_bound]
+
+  + Frame Bound:
+    + RANGE Between Unbounded Preceding AND Current Row
+    + ROWS Between Unbounded Preceding AND Unbounded Following
+    + RANGE BETWEEN -123455 AND 0
+
+
++ Hints
+---
+  + syntax:
+
+      /*+ hint[, hint, ...] */
+ 
+  + examples:
+
+      SELECT /*+ BROADCAST(users) */ * FROM applications as app, users as u WHERE app.user_id = u.id 
+
+  + Available hint names:
+    + BROADCAST(tbl_name)    broadcast join
+    + SKEW('tbl_name')       skew join
+      data skew, unevenly distributed among partitions in the cluster
+      need the name of the relation(a table, view or subquery) with skew.
+      https://docs.databricks.com/delta/join-performance/skew-join.html
+    + RANGE_JOIN(tbl_name, bin_size)
+      + applied to any join with a range condition (i.e. between, >, <), selecting bin_size is important
+      + all values involved must be numeric types
+      + range condition must be compared between the same data type
+      + in case of left_join, check the range values on the left table, similar to right_join
+
+      https://docs.databricks.com/delta/join-performance/range-join.html
+
+
+
+#=================================
+#         Data Frame API
+#=================================
+
++ SELECT:
+---
+  + col_names only                : df.select(c1, c2, c3, c4)
+  + one list_comprehension only   : df.select([list_comp])  
+                                    df.select(*[list_comp])
+  + col_names + list_comprehension: df.select(c1, c2, *[list_comp])
+  + cols + list_comprehension     : df.select(cols_list + [list_comp])
+  + list_comp inside list_comp    : use reduce function to flatten the inside lists, see below example:
+
+        Example: https://stackoverflow.com/questions/58219205
+        df = spark.read.json('file:///home/hdfs/test/pyspark/json-12-1.txt', multiLine=True)
+        cols = [ c[0] for c in df.dtypes if c[1].startswith('struct') ]
+        fields_mapping = { 
+                f['name']:[i['name'] for i in f['type']['fields']] 
+                    for f in df.schema.jsonValue()['fields'] 
+                    if type(f['type']) is dict and f['type']['type'] == 'struct' 
+        }
+        # below will keep the original column orders
+        df.select(
+             reduce(lambda x,y: x+y, [
+                 [ F.col(c).getItem(f).alias('`{}_{}`'.format(c,f)) for f in fields_mapping[c] ]
+                     if c in cols else [c] 
+                 for c in df.columns
+             ])
+        ).show()
+
+
++ Hints:
+---
+  + df.hint(name, *parameters)
+    + broadcast:  df1.hint('broadcast').join(df2, on='id', how='left')
+      * see also: pyspark.sql.functions.broadcast()
+    + skew_join:
+    + range_join:
+
+
+References:
+[1] https://docs.databricks.com/spark/latest/spark-sql/language-manual/select.html#aggregation
