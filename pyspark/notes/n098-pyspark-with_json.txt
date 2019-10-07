@@ -1,0 +1,112 @@
+Working with JSON data and PySpark:
+
+
+
++ spark.read.json(path)
+---
+  + Options:
+    + path: can be a list of path, or RDD of strings storing JSON objects
+    + schema: simpleString is fine or using DDL
+  * + allowSingleQuotes: default true
+  * + allowUnquotedFieldNames: default false
+    + allowUnquotedControlChars: 
+    + allowNumericLeadingZero: default false
+    + allowBackslashEscapingAnyCharacter: default false
+    + allowComments: default false
+  * + dateFormat: default yyyy-MM-dd
+  * + timestampFormat: default yyyy-MM-dd'T'HH:mm:ss.SSSXXX
+  * + multiLine: default false
+    + mode: PERMISSIVE, DROPMALFORMED, FAILFAST
+    + encoding: 
+  * + lineSep: default '\r?\n'
+  * + samplingRatio: sample for inferSchema, default 1.0, go through file once for all lines
+    + prefersDecimal: 
+    + primitivesAsString: default false, if true all input columns are StringType
+    + dropFieldIfAllNull: default false
+    + columnNameOfCorruptRecord: 
+
+  Notes:
+   (1) If multiLine=True, then the input file should be wrapped in an array in a valid JSON format:
+
+           [ {
+              /* key1 content */
+             },
+             { /* key2 contents */ }
+           ]
+
+       On the other hand, if multiLine=False, each line will be treated as a dataframe Row, only the first 
+       dict will be processed (below only `val1` and `val3` are loaded into dataframe)
+ 
+           {'key': 'val1'}{'key': 'val2'}
+           {'key': 'val3'}{'key': 'val4'}{'key': 'val8'}{'key': 'val5'}
+
+   (2) JSON's NULL value is `null`, case-sensitive and no-quoting
+
+
+
++ spark.write.json(path)
+---
+  + Options:
+    + path: 
+    + mode: append, overwrite, ignore, error(default)
+    + compression: none, bzip2, gzip, lz4, snappy and deflate
+    + dateFormat:
+    + timestampFormat:
+    + encoding:
+    + lineSep: 
+
+
+
++ pyspark.sql.functions:
+---
+  + pyspark.sql.functions.get_json_object(col, path)
+    + When: if there is only 1-2 keys you want to retrive from a bulk JSON string, then
+
+  + pyspark.sql.functions.from_json(col, schema, options={})
+    + When if you can set up the schema, missing keys are fine, they will be filled with null
+
+  + pyspark.sql.json_tuple(col, *fields)
+    + When: you have an JSON array and want to explode it into Rows (similar to explode/str_to_map) 
+
+  + pyspark.sql.functions.schema_of_json(json)
+    + generate the schema of the corresponding json string in the DDL format (`simpleString`)
+
+  + pyspark.sql.functions.to_json(col, options={})
+    + convert a column containing StructType, ArrayType or MapType into JSON string
+
+
+
++ pyspark.sql.types
+  + json(): 
+    put the DataType() metadata into a JSON string
+  + jsonValue(): 
+    put the DataType() metadata into a Python data structure
+  + fromJson():     <-- a classmethod
+    specify the DataType using a JSON value. for example:
+
+         col_dtype = StructType.fromJson(json_value)
+
+  JSON data type mapping:
+    - Array: ArrayType()
+    - Boolean: BooleanType()
+    - null: NullType()
+    - Object: StructType(), MapType()
+    - String: StringType()
+    - Number: Numeric types
+
+
+  
++ DataFrame.toJSON()
+  convert a dataframe into a RDD of string
+
+
+Notes: 
+---
+  (1) Single-quotes are allowed for JSON quoting:  allowSingleQuotes=true by default for pyspark JSON reader
+
+  (2) pyspark's JSONPath support is limited, check the following page for all supported functionalities:
+
+   https://cwiki.apache.org/confluence/display/Hive/LanguageManual+UDF#LanguageManualUDF-get_json_object 
+
+
+
