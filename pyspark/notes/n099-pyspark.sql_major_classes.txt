@@ -179,6 +179,11 @@ spark.sql.DataFrame:
 
            df.count() - df.fillna('').replace('STR', None).summary('count').toPandas().T.iloc[1:,0].astype(int)
        
+   (3) create an empty RDD and empty DataFrame
+
+          rdd_empty = spark.sparkContext.emptyRDD()
+          df_empty  = spark.createDataFrame(rdd_empty, schema='')
+
 
 
 pyspark.sql.GroupedData
@@ -363,16 +368,25 @@ spark.write
 
 pyspark.sql.UDFRegistration
 ---
-  + register(name, f, returnType=None)
+  + spark.udf.register('func_name', <func_def>, <return_type>)
     * Python-based user-define function
-  + registerJavaFunction(name, javaClassName, returnType=None)   <-- from spark v2.3
-    * Java user-defined function as SQL function, can be Scala udf
-  + registerJavaUDAF(name, javaClassName)      <-- from sparn v2.3
-    * java-based aggregate function
+  + spark.udf.registerJavaFunction('func_name', javaClassName, <return_type>)   <-- from spark v2.3
+    * Java/Scala-based user-defined function as SQL function
+  + spark.udf.registerJavaUDAF(name, javaClassName)      <-- from sparn v2.3
+    * java-based aggregation function
 
   Notes: 
   (1) accessed by spark.udf or sqlContext.udf
   (2) functions only available in SQL context, i.e. selectExpr() 
+  (3) Another old way to register Java/Scala-based udf function:
+
+        sqlContext = SQLContext(spark.sparkContext)
+        spark._jvm.com.jxc.spark.Functions.registerFunc(sqlContext._jsqlContext, "set_group_label_2")
+
+      All mentioned above are applicable only to the Spark SQL context.
+  (4) The following two only applied to DataFrame API:
+      + pyspark.sql.functions.udf(<func_def>, <return_type>)
+      + pyspark.sql.functions.pandas_udf()
 
 
 
@@ -402,7 +416,7 @@ pyspark.sql.types:
   Notes: 
   (1) common methods to all DataType()
       + json() <-- JSON string
-      + jsonValue()  <-- Python object
+      + jsonValue()  <-- JSON value: Python object
       + simpleString()  
       + fromInternal() convert between internal SQL object to native Python object.
         toInternal()
@@ -472,7 +486,6 @@ pyspark.sql.types:
                     for f in df.schema.jsonValue()['fields'] 
                     if type(f['type']) is dict and f['type']['type'] == 'struct' 
            }
-
 
 
 
