@@ -32,12 +32,23 @@ Notes:
  (1) the return of df.schema.jsonValue() is an Python object which can be very useful to 
      programmingly retrieve metadata of all column information in the dataframe
      including dtypes, field_name of StructType() columns
- (2) fromJson() class method can be used to reassign the dtype of a compound datatype,
-     StructType, ArrayType etc
+ (2) fromJson() class method can be used to reassign the dtype of a compound datatype:
+     StructType, ArrayType, MapType, StructField (outermost DataType)
  (3) _parse_datetype_string() for class:`DataType.simpleString`
      + since spark 2.3, this also support a schema in a DDL-formatted string
        "a DOUBLE, b STRING", "a:array<short>", "map<string,string>"
      + case-insensitive
+ (4) an example using fromInternal(), toInternal(), needConversion():
+     REF: http://brianstempin.com/notebooks/Timestamp+demonstration.html
+
+        from datetime import datetime
+
+        DateType().toInternal(datetime(2019,9,28))   --> 18167
+        DateType().fromInternal(18166)               --> datetime.date(2019, 9, 27)
+
+        DoubleType().needConversion()     <-- False
+        TimestampType().needConversion()  <-- True
+
 
 
 Example-1: using df.schema.jsonValue() to map column names with corresponding dataType which can be
