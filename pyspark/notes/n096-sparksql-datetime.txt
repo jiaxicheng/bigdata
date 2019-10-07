@@ -1,0 +1,109 @@
+Spark SQL built-in Date/Timestamp functions:
+
+
+built-in functions:
+---
+  + current_date:
+  + current_timestamp() = now()
+  + type casting
+    + timestamp(ts/string), cast(ts as 'timestamp')
+    + date(ts/string), cast(ts as 'date')
+  + useful functions:
+    + string add_months(d, N)                                               <-- exact month
+      + HiveQL has one more argument `fmt`
+    + string next_day(d, fmt): fmt can be: ['MO', 'TU', .. 'SA', 'SU']
+    + string last_day(d)
+    + string trunc(d, fmt): Supported formats: MONTH/MON/MM, YEAR/YYYY/YY
+      * compatible with HiveQL
+    + timestamp date_trunc(fmt, ts): 
+       fmt can be one of ["YEAR", "YYYY", "YY", "MON", "MONTH", "MM", "DAY", "DD"
+                         , "HOUR", "MINUTE", "SECOND", "WEEK", "QUARTER"]
+    + date date_add(d, N)  
+    + date date_sub(d, N)
+    + double months_between(d1, d2)
+    + int datediff(end_date, start_date)
+  + date/timestamp conversion:
+    + bigint unix_timestamp(d, fmt)
+      * same as to_unix_timestamp(d, fmt) in SparkSQL
+    + date to_date(d, fmt)  
+      * same as cast('date') astype('date')
+    + timestamp to_timestamp(d, fmt)
+      * same to cast('timestamp'), while keep the precision to milliseconds
+    + timestamp from_unixtime(bigint d, format='yyyy-MM-dd HH:mm:ss')
+    + timestamp from_utc_timestamp(d, tz)
+    + timestamp to_utc_timestamp(d, tz)
+    + string date_format(d, fmt)
+  + Date/time granuity:
+    + int year(d)
+    + int quarter(date/timestamp/string)
+    + int month(d)
+    + int dayofmonth(d), day(d)
+    + int hour(d)
+    + int minute(d)
+    + int second(d)
+    + int weekofyear(d)
+    + int dayofyear(d)
+    + int dayofweek(d) or weekday(d): 1:Sun, 2:Mon,..,7:Sat  
+
+  + TimestampType <-> LongType: unix_timestamp, from_unixtime
+  + Date/Timestamp/String to String: date_format
+
+
+Notes: 
+  (1) In from_utc_timestamp/to_utc_timestamp,  `d` can be {any primitive type}* = including timestamp/date
+      , tinyint/smallint/int/bigint, float/double, decimal
+
+
+Some References: 
+[1] https://docs-snaplogic.atlassian.net/wiki/spaces/SD/pages/2458071/Date+Functions+and+Properties+Spark+SQL
+[2] Java SimpleDateFormats: https://docs.oracle.com/javase/tutorial/i18n/format/simpleDateFormat.html
+[3] HiveQL built-in functions: https://cwiki.apache.org/confluence/display/Hive/LanguageManual+UDF#LanguageManualUDF-ComplexTypeConstructors
+[4] SparkSQL: https://docs.databricks.com/spark/latest/spark-sql/language-manual/select.html#
+
+
+Example-1: Generating date sequence
+
+   Method-1: use add_months(d, N)       <-- exact month
+
+      transform(sequence(1,6), i -> add_months("2019-01-31", i))
+      #[2019-02-28, 2019-03-31, 2019-04-30, 2019-05-31, 2019-06-30, 2019-07-31]
+
+   Method-2: use sequence with interval 1 month
+
+      sequence(to_date("2019-02-01"), to_date("2019-07-05"), interval 1 month)    <-- 30 days
+      #[2019-02-01, 2019-03-01, 2019-03-31, 2019-04-30, 2019-05-31, 2019-06-30]
+
+
+Example-2: Issues with microsecond: 20190111-08:15:45.275753
+pyspark only hold to second level:
+https://stackoverflow.com/questions/54232494/working-with-microsecond-time-stamps-in-pyspark
+
+    Solution-1: split microsecond from timestamp, convert unix_timestamp(to_timestamp(..)..) to long
+                and then plus the substring_index(dt,'.',-1)/1000000 
+        REF: https://stackoverflow.com/questions/50648154/microsecond-time-stamps-in-pyspark
+
+        time_df.withColumn("time",  F.expr("""
+                unix_timestamp(to_timestamp(substring(dt,0,23), 'yyyyMMdd-HH:mm:ss')) 
+              + double(substring_index(dt, '.', -1))/1000000 as time
+            """)
+        ).show()
+        +------------------------+-------------------+
+        |dt                      |time               |
+        +------------------------+-------------------+
+        |20150408-01:12:04.275753|1.428469924275753E9|
+        +------------------------+-------------------+
+
+    Solution-2: cast() or timestamp
+
+        spark.sql("select double(timestamp('2016-07-13 14:33:53.979'))").show(truncate=False)
+        +----------------------------------------------------------+
+        |CAST(CAST(2016-07-13 14:33:53.979 AS TIMESTAMP) AS DOUBLE)|
+        +----------------------------------------------------------+
+        |                                          1.468434833979E9|
+        +----------------------------------------------------------+
+
+
+
+
+
+
