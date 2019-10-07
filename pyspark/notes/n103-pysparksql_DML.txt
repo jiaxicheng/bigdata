@@ -88,8 +88,9 @@ SELECT [hints, ...] [ALL|DISTINCT] named_expression[, named_expression, ...]
     + RANGE BETWEEN -123455 AND 0
 
 
-+ Hints
++ Hints: 
 ---
+  + the Hint framework was added in Spark SQL 2.2
   + syntax:
 
       /*+ hint[, hint, ...] */
@@ -99,7 +100,12 @@ SELECT [hints, ...] [ALL|DISTINCT] named_expression[, named_expression, ...]
       SELECT /*+ BROADCAST(users) */ * FROM applications as app, users as u WHERE app.user_id = u.id 
 
   + Available hint names:
-    + BROADCAST(tbl_name)    broadcast join
+    + BROADCAST(tbl_name)    broadcast join or map-side join
+        
+        SELECT /*+ MAPJOIN(b) */ ...
+        SELECT /* BROADCASTJOIN(b) */ ...
+        SELECT /* BROADCAST(b) */ ...
+
     + SKEW('tbl_name')       skew join
       data skew, unevenly distributed among partitions in the cluster
       need the name of the relation(a table, view or subquery) with skew.
@@ -109,9 +115,13 @@ SELECT [hints, ...] [ALL|DISTINCT] named_expression[, named_expression, ...]
       + all values involved must be numeric types
       + range condition must be compared between the same data type
       + in case of left_join, check the range values on the left table, similar to right_join
+    + COALESCE and REPARTITION: (added Spark SQL 2.4, SQL comments only)
+      
+        SELECT /*+ COALESCE(5) */ ...
+        SELECT /*+ REPARTITION(3) */ ...
 
       https://docs.databricks.com/delta/join-performance/range-join.html
-
+      https://jaceklaskowski.gitbooks.io/mastering-spark-sql/spark-sql-hint-framework.html
 
 
 #=================================
