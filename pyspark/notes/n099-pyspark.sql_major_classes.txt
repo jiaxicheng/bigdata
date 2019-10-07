@@ -22,16 +22,22 @@ pyspark.sql.SparkSession:
     + getOrCreate()
     + enableHiveSupport()
   + createDataFrame(data, schema=None, samplingRatio=Nove, verifySchema=True)
-    Note: data can be an RDD, or list, pandas.DataFrame
   + range(start, end=None, step=1, numPArtitions=None)
-    Note: if only one argument is specified, it will be used as the `end` value
-      testing DF-API functions: spark.range(1).select('...').show()
+    * if only one argument is specified, it will be used as the `end` value
   + sql(sqlQuery)
-      testing Spark SQL builtin functions: spark.sql('select ...').show()
   + table(tableName): returns the table name as a dataframe
   + newSession()
     stop()
 
+  Notes:
+   (1) below are very useful in testing codes:
+     + testing DF-API functions: spark.range(1).select('...').show()
+     + testing Spark SQL       : spark.sql('select ...').show()
+   (2) data in spark.createDataFrame() can be:
+     + an RDD of any kind of SQL data representation
+     + list
+     + pandas.DataFrame
+    
 
 
 pyspark.sql.Row: 
@@ -125,11 +131,14 @@ spark.sql.DataFrame:
     sort(*col)
     sortWithinPartitions
   + foreach(f)
-    foreachPArtition(f)
+    foreachPartition(f)
   + drop(*cols)
     dropDuplicates(subset=None)  same to drop_duplicates
     dropna(how='any', thresh=None, subset=None)
   + fillna(value, subset=None)
+  + replace(to_replace, value=<>, subset=None): 
+    * Note: value and to_replace must have the same type, only available to numerics, booleans or strings
+            to_replace and value can be list, to_replace can be a dict when value is missing.
   + describe(): compute basic stat for numeric and string columns
     summary()
     agg(*expr)
@@ -141,9 +150,6 @@ spark.sql.DataFrame:
     crosstab(col1, col2)
     cube(*col)
     rollup(*col)
-  + replace(to_replace, value=<>, subset=None): 
-    * Note: value and to_replace must have the same type, only available to numerics, booleans or strings
-            to_replace and value can be list, to_replace can be a dist when value is missing.
   + coalesce(N)
     repartition(N, *cols)
     repartitonByRange(N, *cols)
@@ -164,6 +170,15 @@ spark.sql.DataFrame:
     toLocalIterator()
     toPandas()
 
+  Notes:
+   (1) coalesce will not trigger shuffling if go from 100 partitions to 10 partitions.
+       if a larger partition is requested, it will stay at the current # of partitions
+       use repartition() if you want to increase # of partitions
+   (2) for df.replace(), value must match the whole string, not a regex match or substring match.
+       the following can be used to explore number of `STR` in the StringType() columns of the dataframe:
+
+           df.count() - df.fillna('').replace('STR', None).summary('count').toPandas().T.iloc[1:,0].astype(int)
+       
 
 
 pyspark.sql.GroupedData
@@ -384,7 +399,7 @@ pyspark.sql.types:
       new_schema = schema.add('new_field', LongType())
     + fieldNames(): returns all field names in a list
 
-  Note: 
+  Notes: 
   (1) common methods to all DataType()
       + json() <-- JSON string
       + jsonValue()  <-- Python object
@@ -428,6 +443,13 @@ pyspark.sql.types:
           ArrayType: (list, tuple, array),
           MapType: (dict,),
           StructType: (tuple, list, dict),
+      }
+
+      int_size_to_type: {
+          <=8 : (ByteType, tinyint),
+          <=16: (ShortType, smallint)
+          <=32: (IntegerType, int)
+          <=64: (LongType, long)
       }
 
    (4) BinaryType() is byteArray, you can access it through substr(barr,1,1), not `barr[0]`
