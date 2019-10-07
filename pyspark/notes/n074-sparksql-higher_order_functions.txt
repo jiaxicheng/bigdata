@@ -106,3 +106,29 @@ https://stackoverflow.com/questions/58156078/pyspark-compare-empty-map-literal/5
     +----------------+--------+----+--------+
 
 
+(5) find non-null values which has key == 'searchkey' - use filter
+
+    Notes: this is a question asked several times on stackoverflow.
+    REF: https://stackoverflow.com/questions/58260374
+
+    the field schema is the following:
+    root
+     |-- event_params: array (nullable = true)
+     |    |-- element: struct (containsNull = true)
+     |    |    |-- key: string (nullable = true)
+     |    |    |-- value: struct (nullable = true)
+     |    |    |    |-- int_value: long (nullable = true)
+     |    |    |    |-- string_value: string (nullable = true)
+
+   
+    # use filter to find the first array element which key satisfies key == searchkey
+    stmt = '''filter(event_params, x -> x.key == "{}")[0]'''.format(searchkey)
+
+    # Run the above `stmt` with expr() function and asign the value to a temporary column `f1`
+    # then use `coalesce()` function to retrieve the non-null value.
+    df.withColumn('f1', expr(stmt)) \
+        .selectExpr("coalesce(f1.value.string_value, string(f1.value.int_value),'---') AS event_category") \
+        .show()
+
+
+
