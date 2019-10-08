@@ -123,6 +123,12 @@ SELECT [hints, ...] [ALL|DISTINCT] named_expression[, named_expression, ...]
       https://docs.databricks.com/delta/join-performance/range-join.html
       https://jaceklaskowski.gitbooks.io/mastering-spark-sql/spark-sql-hint-framework.html
 
+  Notes:
+   (1) How to select bin_size of range_join by checking the approx_percentile for reference:
+
+        SELECT approx_percentile(cast(end - start as double), array(0.5, 0.9, 0.99, 0.999, 0.9999) FROM ranges
+        
+
 
 #=================================
 #         Data Frame API

@@ -130,3 +130,9 @@ Notes:
     |               A0|   |   |   |   |   |   |   |
     +-----------------+---+---+---+---+---+---+---+
 
+(3) NULL char can be used in regexp_replace and split functions as delimiter
+    for more general text content, below list how to use NULL char in API functions:
+
+    NULL char: \0, \x00, \u0000
+    unicodeescape: \xXX, \uXXXX
+
