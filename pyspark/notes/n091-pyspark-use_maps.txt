@@ -58,18 +58,16 @@ Example-2: Use create_map()
 
         d = {0:'Created', 3:'c3', 7:'Deleted'}
 
-        mapping_1 = F.create_map([F.lit(i) for i in chain.from_iterable(d.items())])
-    
-        df1.withColumn('mapping', mapping_1).withColumn('ec', F.expr("mapping[event_type]")).show()
-        +----------+--------------------+-------+
-        |event_type|             mapping|     ec|
-        +----------+--------------------+-------+
-        |         0|[0 -> Created, 3 ...|Created|
-        |         3|[0 -> Created, 3 ...|     c3|
-        |         7|[0 -> Created, 3 ...|Deleted|
-        +----------+--------------------+-------+
-    
-        Note: mapping_1 is created under DataFrame API and it can not be called in F.expr() which is under sqlContext.
-              set a tempoary column so it can be access in sqlContext.
-    
-    
+        mapping = F.create_map([F.lit(i) for i in chain.from_iterable(d.items())])
+        #Column<b'map(0, Created, 3, c3, 7, Deleted)'>
+
+        df1.withColumn('values', mapping[F.col('event_type')]).show()
+        +----------+-------+
+        |event_type| values|
+        +----------+-------+
+        |         0|Created|
+        |         3|     c3|
+        |         7|Deleted|
+        +----------+-------+
+
+
