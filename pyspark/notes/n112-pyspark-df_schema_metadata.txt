@@ -152,3 +152,21 @@ Example-5: delete some fields in a column of complex data types.
     df.withColumn('array_b', from_json(to_json('array_b'), new_schema))
 
 
+Example-6: use the existing df.schema to assign another df's schema with some extra new fields
+
+    Note: the StructType used for df.schema is a mutable data type, any late change to an assigned value 
+          from df.schema will change the df.schema itself. so be careful
+    REF: https://stackoverflow.com/questions/58204068
+
+    # the following will change the original df.schema, thus is incorrect
+    schema = df.schema
+    schema.add('cs', 'double')
+         
+    # correct method is as following: 
+    # create a new schema from existing f.schema.jsonValue(), then add new fields.
+    schema = StructType.fromJson(df.schema.jsonValue()).add('cs', 'double')
+
+
+
+
+
