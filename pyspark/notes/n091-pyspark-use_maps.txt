@@ -1,0 +1,75 @@
+Using mapping in pyspark:
+
+discover different ways using maps in pyspark code.
+
+
+Example-1: Use Python dict to fillna different value for each column:
+    Note: the same column will have the same fill_value
+    REF: https://stackoverflow.com/questions/58282826
+
+    # create mapping based on data in D2
+    mapping = { row.col_name.replace(' ',''):row.value for row in D2.collect() }
+
+    # using reduce function and fillna with subset=
+    df_new =  reduce(lambda d,c: d.fillna(mapping[c], subset=[c]), D1.columns, D1)
+
+    #or using list_comprehension
+    from pyspark.sql.functions import isnan, when, col
+    df_new = D1.select([ when(isnan(c), mapping[c]).otherwise(col(c)).alias(c) for c in D1.columns ])
+
+    
+    Example-1.2: A similar post: change value with freqItems() 
+        REF: https://stackoverflow.com/questions/58286674
+
+        # use df.freqItems() to find most frequent items in a column and map colu_name to this value
+        d1 = df.freqItems(df.columns)
+        mapping = d1.select([ F.col(c)[0].alias(c.split('_')[0]) for c in d1.columns ]).first().asDict()
+        df_new = df.select([ when(col(c) == 'nn', mapping[c]).otherwise(col(c)).alias(c) for c in df.columns ])
+
+
+Example-2: Use create_map()
+    Note: different values should be filled with different fill_values
+    
+    Example-2.1: use a List:
+    
+        df1 = spark.createDataFrame([(0,), (3,), (7,)],['event_type'])
+
+        # Need map event_type to 'Created', 'c3' and 'Deleted'
+        lst = [ 'Created', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'Deleted']
+
+        df1.withColumn('mapping', F.array([ F.lit(e) for e in lst])) \
+           .selectExpr('event_type', "mapping[int(event_type)] as values") \
+           .show()
+        +----------+-------+
+        |event_type| values|
+        +----------+-------+
+        |         0|Created|
+        |         3|     c3|
+        |         7|Deleted|
+        +----------+-------+
+
+        Note: element_at() the index starts at '1', array[] index is 0-based
+          
+            mapping[int(event_type)]  ==  element_at(mapping, int(event_type)+1)
+
+    Example-2.2: use a dict:
+
+        from itertools import chain
+
+        d = {0:'Created', 3:'c3', 7:'Deleted'}
+
+        mapping_1 = F.create_map([F.lit(i) for i in chain.from_iterable(d.items())])
+    
+        df1.withColumn('mapping', mapping_1).withColumn('ec', F.expr("mapping[event_type]")).show()
+        +----------+--------------------+-------+
+        |event_type|             mapping|     ec|
+        +----------+--------------------+-------+
+        |         0|[0 -> Created, 3 ...|Created|
+        |         3|[0 -> Created, 3 ...|     c3|
+        |         7|[0 -> Created, 3 ...|Deleted|
+        +----------+--------------------+-------+
+    
+        Note: mapping_1 is created under DataFrame API and it can not be called in F.expr() which is under sqlContext.
+              set a tempoary column so it can be access in sqlContext.
+    
+    
