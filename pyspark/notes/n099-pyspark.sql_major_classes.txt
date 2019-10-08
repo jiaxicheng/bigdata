@@ -84,6 +84,10 @@ pyspark.sql.Column:
   + getField(name): get a field by name in a StructField
     getItem(key)
 
+  Notes: 
+   (1) isNull() and isNotNull() do NOT work on numeric columns, to check numeric Nan values
+       use pyspark.sql.functions.isnan() function. 
+
 
 
 spark.sql.DataFrame:
@@ -174,7 +178,7 @@ spark.sql.DataFrame:
    (1) coalesce will not trigger shuffling if go from 100 partitions to 10 partitions.
        if a larger partition is requested, it will stay at the current # of partitions
        use repartition() if you want to increase # of partitions
-   (2) for df.replace(), value must match the whole string, not a regex match or substring match.
+   (2) for df.replace(), value must match the **WHOLE** string, not a regex match or substring match.
        the following can be used to explore number of `STR` in the StringType() columns of the dataframe:
 
            df.count() - df.fillna('').replace('STR', None).summary('count').toPandas().T.iloc[1:,0].astype(int)
@@ -211,6 +215,37 @@ pyspark.sql.Window:
    (1) By default, when orderBy() is missing, an unbounded Window frame is used
 	 otherwise, a growing Window frame (Window.unboundedPreceding, currentRow)
    (2) boundary start/end are both inclusive and are relative to the current row
+   (3) functions used with WindowSpec:
+       + Window functions:
+         + lag(col, count=1, default=None)
+           lead(col, count=1, default=None) 
+         + ranking based on 
+           + individual row: 
+             * row_number()
+             * rank()
+             * dense_rank()
+           + individual row but in percent:
+             * percent_rank(): relative rank of rows within a window partition
+             * cume_dist(): cumulative distribution of a window partition (fraction of rows that is below the current row)
+           + a group of rows:
+             * ntile(n): split rows into buckets of size-N, based on the orderBy() column
+           REF:https://docs.microsoft.com/en-us/sql/t-sql/functions/percent-rank-transact-sql?view=sql-server-2017
+       + Aggregate functions: 
+         * count(c), max(c), min(c), avg(c), mean(c), sum(c), sumDistinct(c), approxCountDistinct(c, rsd)
+         * kurtosis(c), skewness(c)
+         * first(c, ignorenulls=False)
+           last(c, ignorenulls=False)
+         * stddev(c), stddev_pop(c), stddev_samp(c), var_pop(c), var_samp(c), variance(c)
+         * collect_list(c), collect_set(c)
+   (4) By default, sorting is ascending, use the following to adjust to desc:
+       + use API functions: 
+         * F.desc(c)
+         * F.desc_null_first(c)
+       + use column method: desc()
+         * F.col('col1').desc()
+         * df.col1.desc_null_last()
+   (5) For Spark < version 2.3, rangeBetween() only applied to numeric data types(Long, Double etc), newer version 
+       support DateType and TimestampType.
 
 
 
