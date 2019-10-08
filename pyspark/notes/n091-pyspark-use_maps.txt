@@ -27,32 +27,12 @@ Example-1: Use Python dict to fillna different value for each column:
         df_new = df.select([ when(col(c) == 'nn', mapping[c]).otherwise(col(c)).alias(c) for c in df.columns ])
 
 
-Example-2: Use create_map()
+Example-2: Use mapping created from F.create_map() or even F.array()
     Note: different values should be filled with different fill_values
     
-    Example-2.1: use a List:
-    
-        df1 = spark.createDataFrame([(0,), (3,), (7,)],['event_type'])
+    df = spark.createDataFrame([(0,), (3,), (7,)],['event_type'])
 
-        # Need map event_type to 'Created', 'c3' and 'Deleted'
-        lst = [ 'Created', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'Deleted']
-
-        df1.withColumn('mapping', F.array([ F.lit(e) for e in lst])) \
-           .selectExpr('event_type', "mapping[int(event_type)] as values") \
-           .show()
-        +----------+-------+
-        |event_type| values|
-        +----------+-------+
-        |         0|Created|
-        |         3|     c3|
-        |         7|Deleted|
-        +----------+-------+
-
-        Note: element_at() the index starts at '1', array[] index is 0-based
-          
-            mapping[int(event_type)]  ==  element_at(mapping, int(event_type)+1)
-
-    Example-2.2: use a dict:
+    Example-2.1: use F.create_map and a dict:
 
         from itertools import chain
 
@@ -61,7 +41,7 @@ Example-2: Use create_map()
         mapping = F.create_map([F.lit(i) for i in chain.from_iterable(d.items())])
         #Column<b'map(0, Created, 3, c3, 7, Deleted)'>
 
-        df1.withColumn('values', mapping[F.col('event_type')]).show()
+        df.withColumn('values', mapping[F.col('event_type')]).show()
         +----------+-------+
         |event_type| values|
         +----------+-------+
@@ -69,5 +49,14 @@ Example-2: Use create_map()
         |         3|     c3|
         |         7|Deleted|
         +----------+-------+
+
+    Example-2.2: use F.array and a List:
+    
+        lst = [ 'Created', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'Deleted']
+
+        mapping_a = F.array([F.lit(i) for i in lst])
+        # Column<b'array(Created, c1, c2, c3, c4, c5, c6, Deleted)'>
+
+        df.withColumn('values', mapping_a[F.col('event_type')]).show()
 
 
