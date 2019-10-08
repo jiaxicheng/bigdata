@@ -131,4 +131,67 @@ https://stackoverflow.com/questions/58156078/pyspark-compare-empty-map-literal/5
         .show()
 
 
+(6) sequence/transform etc with many date manipulations:
+    REF: https://stackoverflow.com/questions/58270388    
+
+    data = [("2000-01-01 15:20:37", "2000-01-01 19:12:22"), ("2000-01-01 15:00:00", "2000-01-01 19:00:00")]
+    df = spark.createDataFrame(data, ["minDate", "maxDate"]) 
+    df = df.withColumn('minDate', F.to_timestamp('minDate')).withColumn('maxDate', F.to_timestamp('maxDate'))
+    >>> df.show()                                                                                                          
+    +-------------------+-------------------+
+    |            minDate|            maxDate|
+    +-------------------+-------------------+
+    |2000-01-01 15:20:37|2000-01-01 19:12:22|
+    |2000-01-01 15:00:00|2000-01-01 19:00:00|
+    +-------------------+-------------------+
+
+   Below two selectExpr methods:
+   * the first selectExpr, create a list `dt_list`:
+     (1) use sequence to generate a list of dates from minDate to maxDate interval by 1 hour
+     (2) use transform to truncate the date to `HOUR`
+     (3) union/concat the original two date: minDate, maxDate
+     (4) sort and then remove duplicates (when minData/maxDate on exact hour)
+     (5) filter the date when it's > maxDate 
+   * the 2nd selectExpr:
+     (1) use the sequence to iterate from 0 to size(dt_list)-2
+     (2) transform the array into a named_struct using the adjacents two dates
+     (3) explode the resultset into table using inline function
+
+    >>> df.selectExpr("""
+        filter(
+          array_distinct(
+            array_sort(
+              concat(
+                array(minDate, maxDate),
+                transform(
+                  sequence(minDate, maxDate, interval 1 hour),
+                  x -> date_trunc('HOUR', x + interval 1 hour)
+                )
+              )
+            )
+          ), x -> x <= maxDate
+        ) as dt_list
+      """).selectExpr("""
+
+        inline(
+          transform(sequence(0, size(dt_list)-2), i ->
+            named_struct('minDate', IF(i=0, dt_list[i], dt_list[i] + interval 1 second), 'maxDate', dt_list[i+1])
+          )
+        )
+
+      """).show(truncate=False)
+    +-------------------+-------------------+
+    |minDate            |maxDate            |
+    +-------------------+-------------------+
+    |2000-01-01 15:20:37|2000-01-01 16:00:00|
+    |2000-01-01 16:00:01|2000-01-01 17:00:00|
+    |2000-01-01 17:00:01|2000-01-01 18:00:00|
+    |2000-01-01 18:00:01|2000-01-01 19:00:00|
+    |2000-01-01 19:00:01|2000-01-01 19:12:22|
+    |2000-01-01 15:00:00|2000-01-01 16:00:00|
+    |2000-01-01 16:00:01|2000-01-01 17:00:00|
+    |2000-01-01 17:00:01|2000-01-01 18:00:00|
+    |2000-01-01 18:00:01|2000-01-01 19:00:00|
+    +-------------------+-------------------+
+
 
