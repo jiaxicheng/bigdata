@@ -17,6 +17,39 @@ Basic:
 
 
 
+pyspark.SparkContext:
+  + property:
+    + applicationId
+    + defaultMinPartitions
+    + defaultParallelism
+    + startTime
+    + uiWebUrl
+    + version
+  + method:
+    + accumulator(value, accum_param=None)
+    + broadcast(value)
+    + create RDD from files:
+      + emptyRDD()
+      + range(start, end=None, step=1, numSlices=None)
+      + parallelize(c, numSlices=None)
+        read local Python collection to form an RDD, only useful for testing
+      + textFile(path, minPartitions=None, use_unicode=True)
+        read files in line-mode for RDD elements, can also read multiple files
+      + wholeTextFiles(path, minPartitions=None, use_unicode=True)
+        read multiple files and generate the parid-RDD with key=filename, value=file_content
+        good for system with many many small files
+      + newAPIHadoopFile()
+        useful to read user-defined delimiter sub-string to read RDD elements
+        the resulting RDD is a paired-RDD with key=offset_of_the_delimiter, value=split_text_block
+      + sequenceFile()
+      + pickleFile()
+    + union(rdds)
+      build the union of a list of RDDs
+    + stop()
+      shutdown the SparkContext
+
+
+
 pyspark.RDD:
   + map(f, preservesPartitioning=False)
       * argument in f is RDD element
@@ -137,6 +170,99 @@ Notes:
   (3) the elements of paird-RDD are always 2-item tuples, if there are more than 2 items, the 3rd item
       and the after will be discarded when using *byKey() options. you can convert such RDD into paired-RDD
       using map() or keyBy() functions
+  (4) partition wisely, avoid skewed data, know your data (size, type) and how it's distributed:
+      * if you have to load a large unsplitable file, repartition data to increase #partitions after loading.
+      * for skewed data, repartition using an appropriate key which can evenly spread the load  
+
+    The following commands are used to count numPartitions and related information:
+
+        #Count total # of partitions:
+        rdd.getNumPartitions()
+
+        #Count # of elements in each partition:
+        rdd.mapPartitions(lambda x: [sum(1 for _ in x)]).collect()
+
+        #Show partition content: use with caution, only for testing small dataset
+        rdd.glom().collect() 
+
+
+
+pyspark.Broadcast:
+---
+  + property:
+    + value
+  + method:
+    + load(file)
+      load_from_path(path)
+    + dump(value, f)
+    + unpersist()
+    + destroy()
+
+   Notes: values are read-only and accessible to all workers
+
+
+
+pyspark.Accumulator(aid, value, accum_param)
+---
+  + property:
+    + value
+  + method:
+    + add(val2)
+  pyspark.AccumulatorParam
+  ---
+    + zero(value)
+    + addInPlace(value1, value2)
+
+  Notes: 
+   (1) value is only available on driver, not accessible to any workers
+   (2) By default, SparkContext can only use numeric types(int, float) as the accumulator, users can
+       extend the AccumulatorParam to include list, dict etc.
+   
+       Example-1: extend to List (tested)
+
+           class ListAccumulatorParam(AccumulatorParam):
+               def zero(self, v):
+                   return []
+               def addInPlace(self, acc1, acc2):
+                   return acc1 + acc2
+
+           """Set up accumulator"""
+           acc = sc.accumulator([], ListAccumulatorParam())
+
+       Example-2: extend to dict (untested)
+
+           class DictAccumulatorParam(AccumulatorParam):
+               def zero(self, v):
+                   return {}
+               def addInPlace(self, acc1, acc2):
+                   return {**acc1, **acc2}
+
+           """Set up accumulator"""
+           acc = sc.accumulator({}, DictAccumulatorParam())
+
+    https://stackoverflow.com/questions/32056445/issue-with-creating-a-global-list-from-map-using-pyspark
+    https://stackoverflow.com/questions/44640184/accumulator-in-pyspark-with-dict-as-global-variable
+
+
+
+pyspark.StorageLevel(useDisck, useMemory, useOffHeap, deserialized, replication=1)
+---
+  + DISK_ONLY = StorageLevel(True, False, False, False, 1)
+  + DISK_ONLY_2 = StorageLevel(True, False, False, False, 2)
+  + MEMORY_AND_DISK = StorageLevel(True, True, False, False, 1)
+  + MEMORY_AND_DISK_2 = StorageLevel(True, True, False, False, 2)
+  + MEMORY_ONLY = StorageLevel(False, True, False, False, 1)
+  + MEMORY_ONLY_2 = StorageLevel(False, True, False, False, 2)
+  + OFF_HEAP = StorageLevel(True, True, True, False, 1)
+
+  Notes: deserialized=False for all Python code
+
+
+Some notes:
+  (1) PEP 3113: "tuple parameter unpacking", was removed in Python 3. so the following function is illegal under Python-3
+
+       rdd.map(lambda (x, (y,x)): func(x,y,z) )  --changed to--> rdd.map(lambda x: func(x[0], x[1][0], x[1][1]))
+
 
 
 References:
