@@ -40,6 +40,31 @@ pyspark.sql.SparkSession:
     
 
 
+pyspark.sql.Catalog:
+---
+  + currentDatabase()
+    setCurrentDatabase(dbname)
+  + createTable(tbl_name, path=None, source=None, schema=None, **options)
+    createExternalTable(tbl_name, path=None, source=None, schema=None, **options)
+  + listDatabases()
+    listColumns(tbl_name, dbname=None)
+    listFunctions(dbname=None)
+    listTable(dbname=None)
+  + dropGlobalTempView(view_name)
+    dropTempView(view_name)
+  + cacheTable(tbl_name)
+    isCached()
+    uncacheTable(tbl_name)
+    clearCache()
+  + refreshByPath(path)
+    refreshTable(tbl_name)
+  + recoverPartitions(tbl_name)
+  + registerFunction: alias to spark.udf.register()
+
+  Notes: list metadata information about database, table, columns, cache etc.
+
+
+
 pyspark.sql.Row: 
 ---
   + asDict(recursive=False)
