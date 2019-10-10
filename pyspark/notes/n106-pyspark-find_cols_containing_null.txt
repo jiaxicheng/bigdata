@@ -69,7 +69,25 @@ Example-2: Find all columns which does not match a regex_pattern
     Next process df with the method in Solution section
 
 
+##########################################
+Make it simpler in one pass:
 
+
+    Example-1:
+
+        from pyspark.sql.functions import sum, when, coalesce, to_date
+        df = df1.select([ 
+            sum(when(coalesce(*[to_date(c, format=f) for f in fmts]).isNull(),1).otherwise(0)).alias(c) for c in cols
+        ])
+  
+    Example-2:
+
+        from pyspark.sql.functions import regexp_extract, sum, when 
+        df = df1.select([ sum(when(regexp_extract(c, ptn, 0) == '', 1).otherwise(0)).alias(c) for c in cols ] )
+
+    then do the following:
+
+        cols_keep = [ c for c,v in df.first().asDict().items() if not v ]
 
 
 
