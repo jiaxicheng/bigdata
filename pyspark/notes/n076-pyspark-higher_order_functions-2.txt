@@ -1,0 +1,75 @@
+Continue..
+
+Spark SQL higher-order functions:
+
+
+(8) Modify field values inside a complex data type:
+    REF: https://stackoverflow.com/questions/58305514/replace-an-existing-field-within-array-using-spark
+
+    DataFrame is built on top of RDD which is immutable.
+    Row object is immutable, you have to recreate a new object in order to update existing Row object.
+
+    Example-1: array of structs
+
+    >>> df.printSchema()
+    root
+     |-- col1: string (nullable = true)
+     |-- col2: array (nullable = true)
+     |    |-- element: struct (containsNull = true)
+     |    |    |-- cola: string (nullable = true)
+     |    |    |-- colb: string (nullable = true)
+     |-- colb: array (nullable = true)
+     |    |-- element: string (containsNull = true)
+
+    #replace col2[*].colb with colb
+    df.withColumn('col3', F.expr("""
+         transform(sequence(0,size(col2)-1), i -> named_struct('cola', col2[i].cola, 'colb', colb[i]))
+       """)).show(truncate=False)
+
+    #+----+------------------------------------+------------------------+---------------------------------------------+
+    #|col1|col2                                |colb                    |col3                                         |
+    #+----+------------------------------------+------------------------+---------------------------------------------+
+    #|t1  |[[a11, b11], [a12, b12]]            |[newb11, newb12]        |[[a11, newb11], [a12, newb12]]               |
+    #|t2  |[[a21, b21], [a22, b22], [a13, b13]]|[newb21, newb22, newb23]|[[a21, newb21], [a22, newb22], [a13, newb23]]|
+    #|t3  |[[a31, b31]]                        |[newb31]                |[[a31, newb31]]                              |
+    #+----+------------------------------------+------------------------+---------------------------------------------+
+
+    Notes: 
+     (1) it's fine the number of items in cols2 does not match colb or colb does not exist, all missing items 
+         will be filled with empty.
+     (2) Method-2: use RDD map function:
+
+        from itertools import zip_longest         
+
+        #df.rdd.filter(lambda x: x.colb is list) \
+        df.rdd.map(lambda x: x if type(x.colb) is list else Row(colb=[None], col1=x.col1, col2=x.col2)) \ 
+        df.rdd.map(lambda x: 
+                Row(**dict({ k:([v] if (k=='colb')&(type(v) is not list) else v) for k,v in x.asDict().items()}))
+            ).map(lambda row: 
+                Row(col1=row.col1, col2=[ Row(cola=c2.cola, colb=cb) for c2, cb in zip_longest(row.col2, row.colb)]) 
+            ).toDF().show(truncate=False)  
+        #+----+--------------------------------------+
+        #|col1|col2                                  |
+        #+----+--------------------------------------+
+        #|t1  |[[a11, newb11], [a12, newb12]]        |
+        #|t2  |[[a21, newb21], [a22, newb22], [a13,]]|
+        #|t3  |[[a31, newb31]]                       |
+        #+----+--------------------------------------+
+
+    Example-2: struct of structs (much simpler one)
+      REF: https://stackoverflow.com/questions/50123771/change-value-of-nested-column-in-dataframe
+
+
+(9) Use zip_with + array_repeat + flatten + array_join:
+    REF: https://stackoverflow.com/questions/58322574/pyspark-creating-string-with-substring-and-frequency-vector
+
+    df.withColumn('output', F.expr('''
+            array_join(flatten(zip_with(`substr`, `frequency`, (x,y) -> array_repeat(x,int(y)))), ' ')
+        ''')).show(truncate=False)
+    +-----------------+---------+----------------------------+
+    |substr           |frequency|output                      |
+    +-----------------+---------+----------------------------+
+    |[ham, spam, eggs]|[1, 2, 3]|ham spam spam eggs eggs eggs|
+    |[foo, bar]       |[2, 1]   |foo foo bar                 |
+    +-----------------+---------+----------------------------+
+
