@@ -1,0 +1,76 @@
+How to find all column names in a dataframe which contain null.
+
+Many of questions can be converted into this same category:
+(1) find all columns containing invalid date
+(2) find all columns containing values does not match a regex
+
+REF: https://stackoverflow.com/questions/58321655/pyspark-return-columns-where-all-the-cells-match-regex
+
+#########################################
+Solution: compare df.count() with df.summary('count'):
+
+    # get all Number of rows in df
+    N = df.count()
+
+    # use df.summary('count') find all non-null #Row for each column
+    # and then compare with `N` to find all columns having `count == N`
+    cols_keep = [ c for c,v in df.summary('count').select(cols).first().asDict().items() if int(v) == N ]    
+
+    Notes: 
+      (1) df.summary() only check string or numeric data types. for a DateType column, cast the result 
+          into StringType
+
+#########################################
+Example-1: Find all columns containing invalid dates
+
+    from pyspark.sql.functions import coalesce, to_date
+
+    df1.show()                                                                                                          
+    +--------------+-------------+------------+--------------+
+    |            c1|           c2|          c3|            c4|
+    +--------------+-------------+------------+--------------+
+    |11 - 12 - 1993| 4 | 4 | 2014|8 - 7 - 2013|          null|
+    | 12 / 6 / 1965| 8 - 6 - 2013|date missing|11 - 12 - 1993|
+    | 10 / 5 / 2001|7 - 11 - 2011|4 | 5 | 2015| 10 / 5 / 2001|
+    +--------------+-------------+------------+--------------+
+
+    cols = df1.columns
+
+    df = df1.select([ coalesce(*[to_date(c, format=f) for f in fmts]).astype('string').alias(c) for c in cols])
+    df.show()
+    +----------+----------+----------+----------+
+    |        c1|        c2|        c3|        c4|
+    +----------+----------+----------+----------+
+    |1993-11-12|2014-04-04|2013-08-07|      null|
+    |1965-12-06|2013-08-06|      null|1993-11-12|
+    |2001-10-05|2011-07-11|2015-04-05|2001-10-05|
+    +----------+----------+----------+----------+
+
+    Next process df with the method in Solution section
+
+
+#########################################
+Example-2: Find all columns which does not match a regex_pattern
+
+    from pyspark.sql.functions import regexp_extract    
+
+    # set up a regex_pattern 
+    ptn = r'\d+ [-/|] \d+ [-/|] \d+'
+
+    df = df1.select([ regexp_extract(c, ptn, 0).alias(c) for c in cols ] ).replace('', None)
+    +--------------+-------------+------------+--------------+
+    |            c1|           c2|          c3|            c4|
+    +--------------+-------------+------------+--------------+
+    |11 - 12 - 1993| 4 | 4 | 2014|8 - 7 - 2013|          null|
+    | 12 / 6 / 1965| 8 - 6 - 2013|        null|11 - 12 - 1993|
+    | 10 / 5 / 2001|7 - 11 - 2011|4 | 5 | 2015| 10 / 5 / 2001|
+    +--------------+-------------+------------+--------------+
+
+    Next process df with the method in Solution section
+
+
+
+
+
+
+
