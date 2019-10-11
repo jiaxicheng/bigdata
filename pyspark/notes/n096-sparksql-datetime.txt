@@ -73,6 +73,11 @@ Example-1: Generating date sequence
       sequence(to_date("2019-02-01"), to_date("2019-07-05"), interval 1 month)    <-- 30 days
       #[2019-02-01, 2019-03-01, 2019-03-31, 2019-04-30, 2019-05-31, 2019-06-30]
 
+   Example-1.2: generate monthly date sequence for the last 36 months
+   https://stackoverflow.com/questions/58341985
+
+      spark.range(36,-1,-1).selectExpr("add_months(date_trunc('MM', current_date()),negative(id)) as date").show(100)
+
 
 Example-2: Issues with microsecond: 20190111-08:15:45.275753
 pyspark only hold to second level:
