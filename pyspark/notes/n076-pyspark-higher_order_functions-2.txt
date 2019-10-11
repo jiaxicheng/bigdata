@@ -41,11 +41,7 @@ Spark SQL higher-order functions:
 
         from itertools import zip_longest         
 
-        #df.rdd.filter(lambda x: x.colb is list) \
-        df.rdd.map(lambda x: x if type(x.colb) is list else Row(colb=[None], col1=x.col1, col2=x.col2)) \ 
-        df.rdd.map(lambda x: 
-                Row(**dict({ k:([v] if (k=='colb')&(type(v) is not list) else v) for k,v in x.asDict().items()}))
-            ).map(lambda row: 
+        df.rdd.map(lambda row: 
                 Row(col1=row.col1, col2=[ Row(cola=c2.cola, colb=cb) for c2, cb in zip_longest(row.col2, row.colb)]) 
             ).toDF().show(truncate=False)  
         #+----+--------------------------------------+
@@ -56,6 +52,10 @@ Spark SQL higher-order functions:
         #|t3  |[[a31, newb31]]                       |
         #+----+--------------------------------------+
 
+        Adjust zip_longest to the following if colb contain null:
+
+            zip_longest(row.col2, (row.colb if type(row.colb) is list else [row.colb]))
+
     Example-2: struct of structs (much simpler one)
       REF: https://stackoverflow.com/questions/50123771/change-value-of-nested-column-in-dataframe
 
@@ -63,7 +63,7 @@ Spark SQL higher-order functions:
 (9) Use zip_with + array_repeat + flatten + array_join:
     REF: https://stackoverflow.com/questions/58322574/pyspark-creating-string-with-substring-and-frequency-vector
 
-    df.withColumn('output', F.expr('''
+    df.withColumn('output', expr('''
             array_join(flatten(zip_with(`substr`, `frequency`, (x,y) -> array_repeat(x,int(y)))), ' ')
         ''')).show(truncate=False)
     +-----------------+---------+----------------------------+
@@ -72,4 +72,37 @@ Spark SQL higher-order functions:
     |[ham, spam, eggs]|[1, 2, 3]|ham spam spam eggs eggs eggs|
     |[foo, bar]       |[2, 1]   |foo foo bar                 |
     +-----------------+---------+----------------------------+
+
+
+(10) Use transform, arrays_zip and array_min to find point with cloest distance
+     REF: https://stackoverflow.com/questions/58334817/add-column-with-closest-vaues-to-pyspark-dataframe
+    
+    from pyspark.sql.functions import array, lit, expr
+    
+    bin_array = np.array([0, 5, 10, 15, 20])
+    
+    df_new = df.withColumn('bin_array', array([lit(i) for i in bin_array.tolist()])) \
+               .withColumn('dist_array', expr('transform(bin_array, x -> abs(x-Score))')) \
+               .withColumn('Closest_bin', expr("array_min(arrays_zip(dist_array, bin_array)).bin_array")) \
+               .drop('bin_array', 'dist_array')
+    
+    df_new.show()
+    +-----+-----+----+
+    | Name|Score|  v2|
+    +-----+-----+----+
+    |name1|11.23|10.0|
+    |name2|14.57|15.0|
+    |name3| 2.21| 0.0|
+    |name4| 8.76|10.0|
+    |name5|18.71|20.0|
+    +-----+-----+----+
+
+    Notes: 
+     (1) arrays_zip return array of structs, the first field should be used for sorting and finding array_min
+     (2) bin_array shuold be created before hands so it can be used in sqlContext
+
+
+
+
+
 

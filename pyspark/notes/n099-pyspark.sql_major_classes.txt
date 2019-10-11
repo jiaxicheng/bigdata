@@ -77,6 +77,9 @@ pyspark.sql.Row:
         Row(**dict([ (k, row.asDict().get(k, None)) for k in key_list ]))
         Row(**dict({ k:row.asDict().get(k, None) for k in key_list }))
 
+        add a new field into the existing row object:
+        Row(k3=4, **row.asDict())
+
 
 
 pyspark.sql.Column:
@@ -112,6 +115,9 @@ pyspark.sql.Column:
   Notes: 
    (1) isNull() and isNotNull() do NOT work on numeric columns, to check numeric Nan values
        use pyspark.sql.functions.isnan() function. 
+   (2) col.astype('double'), will trim the leading/trailing whitespces before type casting
+       however `1$2`, `$23.5` containing `[^-+.0-9]` will be casted to null
+       notice that `[+-]` must be the first char if exists and `.`(dot) can have only one.
 
 
 
@@ -360,8 +366,15 @@ spark.read
   (3) mode=FAILFAST might not work as expected
   (4) the option `mergeSchema` is currently only applied to parquet format, for orc, avro, you can 
       explicitly specify the schema, spark will merge the result accororingly.
-
-
+  (5) hadoop support glob the same as in bash glob fo FileInputFormat:
+    https://books.google.com.vn/books?id=Wu_xeGdU4G8C&lpg=PA238&ots=i8wUUFRcZw&pg=PA65#v=onepage&q&f=false
+     + *: 0 or more chars
+     + ?: match single char
+     + [ab]: char set
+     + [^ab]: nagated char set
+     + [a-b]: char range
+     + {a,b}: alternation
+     + \c: escape char
 
 pyspark.sql.DataFrameWriter:
 ---

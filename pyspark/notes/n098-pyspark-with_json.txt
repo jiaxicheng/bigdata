@@ -41,6 +41,7 @@ Working with JSON data and PySpark:
            {'key': 'val3'}{'key': 'val4'}{'key': 'val8'}{'key': 'val5'}
 
    (2) JSON's NULL value is `null`, case-sensitive and no-quoting
+   (3) no comment /* */ or // is allowed, JSON does not support inline comments, add a field for comments
 
 
 
@@ -103,7 +104,6 @@ Working with JSON data and PySpark:
 Notes: 
 ---
   (1) Single-quotes are allowed for JSON quoting:  allowSingleQuotes=true by default for pyspark JSON reader
-
   (2) pyspark's JSONPath support is limited, check the following page for all supported functionalities:
 
    https://cwiki.apache.org/confluence/display/Hive/LanguageManual+UDF#LanguageManualUDF-get_json_object 

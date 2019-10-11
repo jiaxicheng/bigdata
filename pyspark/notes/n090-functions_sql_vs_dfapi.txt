@@ -41,7 +41,7 @@ Functions only in Spark SQL, not in DataFrame API
  + java_method, reflect: only applied to static method from Java/Scala [1]
  + functions from Apache Hive:
    + all functions mentioned above except the higher-order functions
-   + pmod, e, negative, positive, space, assert_true
+   + pmod, e, pi, negative, positive, space, assert_true
    + current_database
    + char_length, character_length, octet_length
  + not from Apache Hive: 
@@ -67,6 +67,7 @@ Functions only in SparkSQL which can be simulated with DF API:
      spark.range(1).select(F.unhex(F.hex(F.lit(65))).astype('string')) == spark.sql('select chr(65)')
  + cot -> df:1/tan
  + pi -> df:2*asin(1)
+ + e -> df:exp(1)
 
 
 Duplicated functions only in SparkSQL to compatible with Standard SQL:
