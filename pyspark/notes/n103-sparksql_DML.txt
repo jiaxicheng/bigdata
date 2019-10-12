@@ -169,6 +169,12 @@ SELECT [hints, ...] [ALL|DISTINCT] named_expression[, named_expression, ...]
     + skew_join:
     + range_join:
 
+Notes:
+ (1) By default Spark SQL commands are case-insensitive, to change it
+
+        sqlContext.sql("set spark.sql.caseSensitive=true")
+
+
 
 References:
 [1] https://docs.databricks.com/spark/latest/spark-sql/language-manual/select.html#aggregation
