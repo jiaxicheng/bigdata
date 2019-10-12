@@ -87,15 +87,15 @@ Spark SQL higher-order functions:
                .drop('bin_array', 'dist_array')
     
     df_new.show()
-    +-----+-----+----+
-    | Name|Score|  v2|
-    +-----+-----+----+
-    |name1|11.23|10.0|
-    |name2|14.57|15.0|
-    |name3| 2.21| 0.0|
-    |name4| 8.76|10.0|
-    |name5|18.71|20.0|
-    +-----+-----+----+
+    +-----+-----+-----------+
+    | Name|Score|Closest_bin|
+    +-----+-----+-----------+
+    |name1|11.23|         10|
+    |name2|14.57|         15|
+    |name3| 2.21|          0|
+    |name4| 8.76|         10|
+    |name5|18.71|         20|
+    +-----+-----+-----------+
 
     Notes: 
      (1) arrays_zip return array of structs, the first field should be used for sorting and finding array_min
