@@ -43,16 +43,16 @@ Run it: copy the file partition-1.txt to file:///home/xicheng/test/partition-1.t
 """
     
 from pyspark.sql import Window, SparkSession, Row
-from pyspark.sql.functions import spark_partition_id, coalesce, sum as _sum, col, max as _max, lit
+from pyspark.sql.functions import coalesce, sum as _sum, col, max as _max, lit
 
 # function to iterate through the sorted list of elements in the same partition
 # assign idx in partition based on Address and LNAME
-def func(it):
+def func(sid, it):
     idx = 0
     lname = None; address = None
     for row in sorted(it, key=lambda x: (x.LNAME, x.Address)):
         if lname and (row.LNAME != lname or row.Address != address): idx += 1
-        yield Row(idx=idx, **row.asDict())
+        yield Row(sid=sid, idx=idx, **row.asDict())
         lname = row.LNAME
         address = row.Address
     
@@ -70,8 +70,7 @@ if __name__ == '__main__':
     then run mapPartitions() function and create in-partition idx
     """
     df1 = df.repartition('LNAME', 'Address') \
-            .withColumn('sid', spark_partition_id()) \
-            .rdd.mapPartitions(func, preservesPartitioning=True) \
+            .rdd.mapPartitionsWithIndex(func, preservesPartitioning=True) \
             .toDF()
     
     # get number of unique rows (based on Address+LNAME) which is max_idx+1
