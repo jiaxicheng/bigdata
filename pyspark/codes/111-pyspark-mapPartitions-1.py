@@ -70,7 +70,7 @@ if __name__ == '__main__':
     then run mapPartitions() function and create in-partition idx
     """
     df1 = df.repartition('LNAME', 'Address') \
-            .rdd.mapPartitionsWithIndex(func, preservesPartitioning=True) \
+            .rdd.mapPartitionsWithIndex(func, preservesPartitioning=False) \
             .toDF()
     
     # get number of unique rows (based on Address+LNAME) which is max_idx+1
