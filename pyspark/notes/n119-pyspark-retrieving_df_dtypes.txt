@@ -1,0 +1,93 @@
+ref: https://stackoverflow.com/questions/58348612
+
+Given database and tableName, try to retrieve all the column names and their dtypes
+and save the results into a dataframe:
+
+Below listed different ways to handle this task:
+
+
+dfs is the dataframe containing names of databases and tables
+
+    dfs.printSchema()                                                                                                  
+    root
+     |-- database: string (nullable = true)
+     |-- tableName: string (nullable = true)
+
+
+Method-1: use df.dtypes
+-----------------------
+
+    from pyspark.sql import Row
+
+    data = []
+    DRow = Row('database', 'tableName', 'dtypes')
+    for row in dfs.select('database', 'tableName').collect():
+        dtypes = spark.sql('select * from `{}`.`{}` limit 1'.format(row.database, row.tableName)).dtypes
+        data.append(DRow(row.database, row.tableName, str(dtypes)))
+
+    df_dtypes = spark.createDataFrame(data)
+
+Note:
+
+* using `dtypes` instead of `str(dtypes)`, you will get the following schema 
+  where _1, and _2 are col_name and col_dtype respectively:
+
+    root
+     |-- database: string (nullable = true)
+     |-- tableName: string (nullable = true)
+     |-- dtypes: array (nullable = true)
+     |    |-- element: struct (containsNull = true)
+     |    |    |-- _1: string (nullable = true)
+     |    |    |-- _2: string (nullable = true)
+
+* need a JSON string, adjust str(dtypes) to json.dumps(dtypes)
+* using this method, each table will have only one row. for the next two methods, each col_type
+  of a table will have its own row.
+
+
+Method-2: use describe 
+----------------------
+
+you can also retrieve this information from running spark.sql("describe tableName") 
+by which you get dataframe directly, then use a reduce function to union the results 
+from all tables.
+
+    from functools import reduce
+
+    def get_df_dtypes(db, tb):
+        return spark.sql('desc `{}`.`{}`'.format(db, tb)) \
+                    .selectExpr(
+                          '"{}" as `database`'.format(db)
+                        , '"{}" as `tableName`'.format(tb)
+                        , 'col_name'
+                        , 'data_type')
+
+    # testing example:
+    get_df_dtypes('default', 'tbl_df1').show()                                                                          
+    +--------+---------+--------+--------------------+
+    |database|tableName|col_name|           data_type|
+    +--------+---------+--------+--------------------+
+    | default|  tbl_df1| array_b|array<struct<a:st...|
+    | default|  tbl_df1| array_d|       array<string>|
+    | default|  tbl_df1|struct_c|struct<a:double,b...|
+    +--------+---------+--------+--------------------+
+
+    # use reduce function to union all tables into one df
+    df_dtypes = reduce(lambda d1, d2: d1.union(d2), [ get_df_dtypes(row.database, row.tableName) for row in dfs.collect() ])
+
+
+Method-3: use spark.catalog.listColumns()
+-----------------------------------------
+
+Use `spark.catalog.listColumns()` which creates a list of `collections.Column` objects, 
+retrieve name and dataType and merge the data. the resulting dataframe is normalized 
+with `col_name` and `col_dtype` on their own columns (same as using *Method-2*).
+    
+    data = []
+    DRow = Row('database', 'tableName', 'col_name', 'col_dtype')
+    for row in dfs.select('database', 'tableName').collect():
+        for col in spark.catalog.listColumns(row.tableName, row.database):
+            data.append(DRow(row.database, row.tableName, col.name, col.dataType))
+    df_dtypes = spark.createDataFrame(data)
+
+
