@@ -61,7 +61,10 @@ pyspark.sql.Catalog:
   + recoverPartitions(tbl_name)
   + registerFunction: alias to spark.udf.register()
 
-  Notes: list metadata information about database, table, columns, cache etc.
+  Notes: 
+   (1) list metadata information about database, table, columns, cache etc.
+   (2) Use spark.catalog.listColumns() return a list of collections.Columns, this command
+       only work with HiveSupported tables, not TempView since they do not have database information
 
 
 
@@ -250,7 +253,7 @@ pyspark.sql.Window:
        + Window functions:
          + lag(col, count=1, default=None)
            lead(col, count=1, default=None) 
-         + ranking based on 
+         + ranking based on: cols in the orderBy()
            + individual row: 
              * row_number()
              * rank()
@@ -376,6 +379,8 @@ spark.read
      + {a,b}: alternation
      + \c: escape char
 
+
+
 pyspark.sql.DataFrameWriter:
 ---
 spark.write
@@ -392,7 +397,7 @@ spark.write
  *    + sep: default ,
  *    + quote: default '"', if empty string, it uses 'u0000' (null character)
  *    + escape: default \
-      + escapeQuotes:
+      + escapeQuotes: default true 
       + quoteAll:
  *    + header: default false
  *    + nullValue: default EMPTY string
@@ -418,8 +423,7 @@ spark.write
       + lineSep
     + orc(path, mode, partitonBy, compression)
     + parquet(path, mode, partitonBy, compression)
-    + text(path, compression, lineSep): 
-      *** the DF must have only one StringType() column
+    + text(path, compression, lineSep) 
   + format with plugins: 
     + avro: 
     + xml: 
@@ -436,6 +440,26 @@ spark.write
   (1) `csv` format can not handle ArrayType(), StructType(), MapType() etc compound data types.
       to save such data types, either convert them to JSON, or use another format, 
       for example, parquet, orc, avro etc.
+      Note: by default, csv file writer does not export header(column names)
+  (2) `text` format must have the DF in one single StringType() column, can use concat_ws:
+
+          df.select(concat_ws('\t', *df.columns)).write.mode('overwrite').text('/path/file')
+
+       However, text file will not save headers(column names)
+
+  (3) do not want to escape the quotes iside the fields, then set `escapeQuotes` = `false`
+      example: https://stackoverflow.com/questions/58348617
+  (4) To use saveAsTable(), you must add enableHiveSupport(), see below. you dont have to 
+      run ApacheHive services, you can use local metastore_db and customize 
+      the spark.sql.warehouse.dir
+
+        spark = SparkSession \
+            .builder \
+            .appName('test') \
+            .config('spark.sql.warehouse.dir', '/path/to/my/warehouse') \
+            .enableHiveSupport() \
+            .getOrCreate()
+        df1.write.format('parquet').mode('overwrite').saveAsTable('tbl_df1')
 
 
 
