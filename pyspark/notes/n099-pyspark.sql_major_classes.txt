@@ -72,8 +72,9 @@ pyspark.sql.Row:
 ---
   + asDict(recursive=False)
 
-    Note:  Row object is immutable and can NOT change key/value pairs
-           use dict comprehension to create new Row object instead
+  Note:  
+   (1) Row object is immutable and can NOT change key/value pairs
+       use dict comprehension to create new Row object instead
 
         key_list= ['k1', 'k2', 'k3']
         row = Row(k1=1, k2=2)
@@ -82,6 +83,11 @@ pyspark.sql.Row:
 
         add a new field into the existing row object:
         Row(k3=4, **row.asDict())
+   (2) The columns is lexical-ordered using the above method, if you
+       want to customize the Column order, use the following method:
+        NRow = Row('k2', 'k1', 'k3')
+        row = NRow(k2_value, k1_value, k3_value)   <-- must be ordered
+
 
 
 
@@ -222,6 +228,8 @@ spark.sql.DataFrame:
           rdd_empty = spark.sparkContext.emptyRDD()
           df_empty  = spark.createDataFrame(rdd_empty, schema='')
 
+   (4) df.freqItems(['col1']) return an array of the freqItems from 'col1', the items in the array
+       are unsorted, dont expect the first item to be the most counted item
 
 
 pyspark.sql.GroupedData
