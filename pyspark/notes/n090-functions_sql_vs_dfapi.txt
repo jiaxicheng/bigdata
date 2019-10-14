@@ -112,8 +112,10 @@ Some notes:
       `#'Column' object is not callable`, try using its SparkSQL corresponding builtin 
       functions. for example, using a column name for array index will work in Spark SQL
       , but not for API functions
-
   (2) in DF-API, logic '|', '&', but in SQL, need 'or', 'and'
+  (3) Spark SQL RLIKE is case-sensitive, the following regex, will match only 'Z' without using `(?i)`
+  
+        filter(text, x -> x rlike "^(?i)Z?[0-9]{4,6}$")
 
 
 References:
