@@ -22,8 +22,12 @@ Method-1: use df.dtypes
     data = []
     DRow = Row('database', 'tableName', 'dtypes')
     for row in dfs.select('database', 'tableName').collect():
+      try:
         dtypes = spark.sql('select * from `{}`.`{}` limit 1'.format(row.database, row.tableName)).dtypes
         data.append(DRow(row.database, row.tableName, str(dtypes)))
+      except Exception as e:
+        print("ERROR from {}.{}: [{}]".format(row.database, row.tableName, e))
+        pass
 
     df_dtypes = spark.createDataFrame(data)
 
@@ -55,12 +59,16 @@ from all tables.
     from functools import reduce
 
     def get_df_dtypes(db, tb):
+      try:
         return spark.sql('desc `{}`.`{}`'.format(db, tb)) \
                     .selectExpr(
                           '"{}" as `database`'.format(db)
                         , '"{}" as `tableName`'.format(tb)
                         , 'col_name'
                         , 'data_type')
+      except Exception as e:
+        print("ERROR from {}.{}: [{}]".format(db, tb, e))
+        pass
 
     # testing example:
     get_df_dtypes('default', 'tbl_df1').show()                                                                          
@@ -86,8 +94,13 @@ with `col_name` and `col_dtype` on their own columns (same as using *Method-2*).
     data = []
     DRow = Row('database', 'tableName', 'col_name', 'col_dtype')
     for row in dfs.select('database', 'tableName').collect():
+      try:
         for col in spark.catalog.listColumns(row.tableName, row.database):
-            data.append(DRow(row.database, row.tableName, col.name, col.dataType))
+          data.append(DRow(row.database, row.tableName, col.name, col.dataType))
+      except Exception as e:
+        print("ERROR from {}.{}: [{}]".format(row.database, row.tableName, e))
+        pass
+
     df_dtypes = spark.createDataFrame(data)
 
 
