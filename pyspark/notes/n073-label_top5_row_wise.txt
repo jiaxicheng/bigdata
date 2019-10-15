@@ -61,7 +61,7 @@ Data Setup:
 
 ## to calculate the top-N based on dense_rank()
 
-    """ Below code is based on Spark 2.40+
+    """ Below code is based on Spark 2.4.0+
     similar to the calculation based on rank(), the only difference is we
     retrieve `Nth` value from the array_distict() before sort_array() step 
     """
@@ -82,7 +82,7 @@ Data Setup:
 
 ## To calculate the top-N based on Row_number()
 
-    """ Below code requires spark 2.40+
+    """ Below code requires spark 2.4.0+
     given an array of all cols, need to find idx of top-N values, this can be achieved
     by create an named_struct(val, idx), sort by `val` and take the topN slice() of array 
     containing the idx only. transform from struct(val, idx) -> idx. Then we use array_contain() 
