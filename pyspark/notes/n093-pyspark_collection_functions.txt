@@ -1,0 +1,112 @@
+Collection functions: 
+
+Note: 
+  (1) the index for array-related functions are all 1-based,
+      col.getItem(N) or col[N] is 0-based
+  (2) except list version for example from v1.5, the functions are from v2.4
+  (3) functions having drop-duplicates as side-effects: array_except, array_intersect and array_union
+
+REF: https://issues.apache.org/jira/browse/SPARK-23899
+
+Initialization:
+---
+  + create_map(*cols)L from v2.0
+    + SQL: map(k0, v0, k1, v1, ...)
+    + map_concat(m1, m2, ..): concat multiple maps
+  + array(*cols): from v1.4
+    + SQL: array(expr,...)
+    + concat(a1, a2,...): concat multiple arrays
+  + struct(*cols): from v1.4
+    + SQL: struct(col1, col2,...)
+           named_struct(name1, val1, name2, val2,...)
+
+
+ArrayType:
+---
+  + basic operations:
+    + element_at(col, N)
+    + size(col): number of items
+    + slice(arr, start, length): 
+    + array_position(col, value):
+      return the index of the first occurance of 'value' in array (1-based)
+  + relationships:
+    + array_union + concat
+      + array_union(arr_1, arr_2): 
+        union two arrays and remove duplicates                              <-- note: drop duplicates is a side-effect
+      + concat(arr_1, arr_2, ...): 
+        union 2 or more arrays, can contain duplicates
+      Note: all array elements must have the same DataType()
+            for StructType(), all field names and types must match
+    + array_except, array_remove:
+      + array_except(arr_1, arr_2): 
+        remove a list of values from the array (drop duplicated elements)   <-- note: drop duplicates is a side-effect
+      + array_remove(arr, v): from v2.4
+        remove 1 value from the array
+    + array_intersect(arr_1, arr_2): 
+      return elements both in arr_1 and arr_2 withoud duplicates            <-- note: drop duplicates is a side-effect
+  + manipulations:
+    + array_sort and sort_array:
+      + array_sort(arr): 
+        elements of the array must be orderable, Null will be put to the end of the array
+      + sort_array(arr, asc=True): from v1.5
+        Null first for asc=True, otherwise Null to the last
+      + reserse(col): reverse the order of array items
+      Note: array elements can be string, all numeric dtypes, struct, array (MapType has no order)
+    + array_distinct(arr): 
+      Note: array elements can be string, all numeric dtypes, struct, array
+    + array_repeat(col, N): 
+      create a new array with the same element of N times
+    + array_join(col, delimiter, null_replacement=None): 
+      convert array into a string:
+    + array_max
+      array_min:
+    + arrays_zip(*cols): 
+      + functionality can be replaced by zip_with for more flexibilities
+    + flatten(arr):
+      * flatten only 1-level(no recursive), array of arrays into an array
+    + shuffle(col): 
+      * generate a random permutation of the given array: on-deterministic
+  + conditions:
+    + array_contains(arr, value): from v1.5
+      * return true/false if value is in/not in the array, return null if array is EMPTY
+    + arrays_overlap(arr_1, arr_2):
+      * return boolean
+    + exists(arr, x -> cond(x))
+      * higher-order function
+  + sequence(start, stop, step=None): 
+    Notes:
+      + Dataframe API must be integers, Spark SQL can generate Date Sequences
+      + monthly sequence is based on 30-day which might not be useful
+      + supported types with SparkSQL: byte, short, integer, long, date, timestamp
+        only integers for DF-API
+      + step can be negative, default 1 or -1 based on start/stop 
+
+MapType:
+---
+  + map_concat(map1, map2, ...):
+    * concatenate maps, might contain duplicate keys.
+  + map_from_arrays(keys_arr, values_arr):
+  + map_from_entries(arr_of_structs): 
+  + map_keys(col): from v2.3
+    * notes return unsorted array containing keys of the map, can be used in transform()
+  + map_values(col): from v2.3
+    * return unsorted array containing values of the map
+
+
+ArrayType + MapType:
+---
+  + size(col): from v1.5
+    length of the array or map stored in the column
+    for StringType(), use length()
+  + element_at(arr, idx): 
+    Note: idx is 1-based, can use `-1` to refer index from the end
+          arr[idx] is 0-based, `-1` is not working
+
+
+ArrayType + StringType:
+---
+  + reverse(col): from v1.5
+    reverse can work on both StringType() and ArrayType() columns
+  + concat(*cols): support array concat from v2.4
+  + concat_ws(sep, *cols): convert a list of StringType, ArrayType into StringType, can be mixed of two data types
+
