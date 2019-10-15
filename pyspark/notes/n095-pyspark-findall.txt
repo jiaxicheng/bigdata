@@ -28,7 +28,7 @@ to reach the same goal. Below is the Pyspark code:
     from pyspark.sql.functions import split, regexp_replace
 
     df = spark.createDataFrame([
-        ('2345834/ mundo por el mero de NJU/LOK 12345T98789 hablantes',),
+        ('23458/ mundo por el mero de NJU/LOK 12345T98789 hablantes',),
         ('con dominio nativo ABC 987480B millones ZES/UJ86758/L87586:residentes en',), 
         ('hispanohablantes  residentes en ABC  98754/ otros pases',)
       ], ['My_column'])
@@ -55,9 +55,47 @@ to reach the same goal. Below is the Pyspark code:
 Notes: 
  (1) (?<!ABC\s{0,5}) will allow to test 0-5 whitespaces between ABC and the NUMBER_NEEDED. 
      since regex negative lookbehind does not support (?<!ABC\s*), if the original text contain 
-     more spaces in between, then adjust 5 to a larger number
- (2) assumed that the NULL char \0 is not shown in your original texts, or you can find another 
-     char or substring, like __SEP__ as the delimiter, just make sure it can split your 
-     text properly
+     more spaces in between, then adjust 5 to a larger number. Note: `(?<!ABC\s{0,5})` is fine
+     with PySpark, but will fail with Python re module which need a fix-width pattern.
+ (2) assumed that the NULL char \0 is not shown in the original texts, you can use another 
+     delimiterchar or just prepross the text with regexp_replace('\0|(?<=ABC)\s+', '')
+     Notes: if we remove all whitespaces after `ABC`, then in (1), we just need `(?<!ABC)`
 
+        df.withColumn('new_column'
+           , split(
+               regexp_replace(
+                 regexp_replace(
+                     regexp_replace('My_column', '\0|(?<=ABC)\s+', '')
+                   , r'.*?(?<!ABC)(?<!\d)(\d{4,6})(?=[A-Z/])'
+                   , '$1\0'
+                 )
+                 , '\0?[^\0]*$'
+                 , ''
+               )
+               , '\0'
+             )
+           ) \
+          .show(truncate=False)
+
+
+ (3) prepend the `ptn` with `(?s)` if any text contain line breaks.
+
+Another solution with UDF:
+
+    import re
+    from pyspark.sql.types import ArrayType, StringType
+    from pyspark.sql.functions import udf
+
+    ptn = re.compile(r'(?<!ABC)(?<!\d)(\d{4,6})(?=[A-Z/])')
+
+    find_number = udf(lambda x: re.findall(ptn, re.sub(r'(?<=ABC)\s+', '', x)) if x else [], ArrayType(StringType()))
+
+    df.withColumn('new_column', find_number('My_column')).show()
+
+Notes: 
+ (1) since Python `re` module does not support `(?<!ABC\s{0,5})`, so use `re.sub(r'(?<=ABC)\s+', '', x)` 
+     to remove all whitespaces after `ABC` as preprocessing.
+ (2) Sometime udf function is much easier to maintain, and might out-perform the solution with 
+     API functions especially when the API function part is overly complex and the regex pattern 
+     contains backtracking like `.*?`
 
