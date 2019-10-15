@@ -1,0 +1,58 @@
+PySpark's rolling Window: using collect_list
+
+from pyspark.sql import Window
+
+Window Spec (a fixed-size Window)
+---
+ + backward: w1 = Window.partitionBy(*col).orderBy(*col).rowsBetween(-winSize, 0)
+ + forward : w2 = Window.partitionBy(*col).orderBy(*col).rowsBetween(0, winSize)
+ + center  : w3 = Window.partitionBy(*col).orderBy(*col).rowsBetween(-winSize, winSize)
+
+Basic statistics:
+---
+  + rolling sum    : F.sum(c).over(w1)
+                     F.sumDistinct(c).over(w1)
+  + rolling average: F.mean(c).over(w3)
+  + rolling count  : F.count(c).over(w1)
+                     F.approxCountDistinct(c).over(w1)
+  + rolling max/min: F.max(c).over(w1)
+                     F.min(c).over(w1)
+
+Using collect_list() for more complex calculations of rolling aggregation:
+---
+(1) calculate the running median: 
+
+    from pyspark.sql.functions import size, array_sort, collect_list, expr
+    df = spark.createDataFrame([(1,i,int(j)) for i,j in enumerate(np.random.randint(0, 20,20))], ['id','d','col1'])
+    winSize = 3
+    w3 = Window.partitionBy('id').orderBy('d').rowsBetween(-winSize, winSize)
+    df.withColumn('arr', array_sort(collect_list('col1').over(w1))) \
+        .withColumn('sz', size('arr')) \
+        .withColumn('median', expr("""
+             IF(sz%2==0, (arr[int(sz/2-1)] + arr[int(sz/2)])/2.0, arr[int((sz-1)/2)])
+         """).astype('int')) \
+        .show(8)
+    +---+---+----+-------------------+---+------+                                   
+    | id|  d|col1|                arr| sz|median|
+    +---+---+----+-------------------+---+------+
+    |  1|  0|   5|         [0, 5, 13]|  3|     5|
+    |  1|  1|  13|      [0, 5, 7, 13]|  4|     6|
+    |  1|  2|   0|  [0, 5, 7, 13, 19]|  5|     7|
+    |  1|  3|   7|  [0, 5, 7, 13, 19]|  5|     7|
+    |  1|  4|  19|  [0, 5, 7, 13, 19]|  5|     7|
+    |  1|  5|   5|  [2, 5, 7, 13, 19]|  5|     7|
+    |  1|  6|  13| [2, 5, 13, 13, 19]|  5|    13|
+    |  1|  7|   2| [2, 5, 13, 13, 17]|  5|    13|
+    +---+---+----+-------------------+---+------+                                   
+
+ 
+(2) higher-order-functions:
+---
+TODO
+
+
+(3) using udf:
+---
+TODO
+
+
