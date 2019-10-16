@@ -1,0 +1,79 @@
+Same question using udf function:
+
+Previous question treats the input argument as a StringType column, here we handle two cases:
++ Input is ArrayType
++ Input is StringType, but include preprocessing for tokenization
+
+
+
+Perl modules:
+--------------
+
+    import re
+    from pyspark.sql.functions import udf
+    from pyspark.sql.types import ArrayType, StringType
+
+Regex Pattern:
+--------------
+
+    """ regex pattern:
+    + Capturing group:
+       $1: (CC)       match EMPTY(CC not exhibit) or `CC`
+       $2: (\d{4,6})  match 4-6 digits
+       $3: ([A-Z,]|$) match [A-Z,] or EMPTY(end of line)
+    + Optional text:
+       (?:MOD|(CC))?
+    + look-behind anchors:
+       (?<!MSN,)
+       (?<!\d)
+    + lookahead anchor:
+       (?=([A-Z,]|$))
+    For each match, we will need to check $1 and $3 to filter and discard a non-match
+    """
+    ptn = re.compile(r'(?:MOD|(CC))?(?<!MSN,)(?<!\d)(\d{4,6})(?=([A-Z,]|$))')
+
+
+
+Input is ArrayType:
+--------------
+
+    def array_filter(arr):
+      try:
+        return [ x[1] for x in re.findall(ptn, ','.join(arr)) if x[0] == 'CC' or (x[2] and x[2] != ',') ]
+      except:
+        return []
+
+    udf_array_filter = udf(array_filter, ArrayType(StringType()))
+
+    df.withColumn('new_column', udf_array_filter('my_split_column')) \
+      .show(truncate=False)
+    +-------------------------------------------------------------------+---------------+
+    |my_split_column                                                    |new_column     |
+    +-------------------------------------------------------------------+---------------+
+    |[MONUMENT, FOR, 72322T79477, PROVISIONS, FOR, VACUUM, INTFC, LH]   |[72322]        |
+    |[MONUMENT, FOR, KIDS, CC104896, L61725, PROVISIONS, INTFC, CC45637]|[104896, 45637]|
+    |[72322, CC45678D, C12345678, 12345C]                               |[45678, 12345] |
+    +-------------------------------------------------------------------+---------------+
+
+
+
+Input is StringType:
+--------------
+
+    """
+    (1) remove all [^\w_\s] chars and then split/join so that to squeeze consecutive whitespaces
+        and meanwhile remove leading/trailing spaces
+    (2) use list comprehension to filter all matched objects using $1 and $3
+    """
+    def find_number(s_t_r):
+      try:
+        s_t_r = ','.join(re.sub('[^\w_\s]+', ' ', s_t_r).split())
+        return [ x[1] for x in re.findall(ptn, s_t_r) if x[0] == 'CC' or (x[2] and x[2] != ',') ]
+      except:
+        return []
+
+    udf_find_number = udf(find_number, ArrayType(StringType()))
+
+    df.withColumn('new_column', udf_find_number('My_raw_string')) \
+      .show(truncate=False)
+
