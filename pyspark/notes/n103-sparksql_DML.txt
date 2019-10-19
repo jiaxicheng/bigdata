@@ -30,6 +30,18 @@ SELECT [hints, ...] [ALL|DISTINCT] named_expression[, named_expression, ...]
 
       SELECT * FROM df_tbl LATERAL VIEW inline_outer(struct_c) my_view
       SELECT struct_c.a, my_view.* FROM df_tbl LATERAL VIEW OUTER explode(array_b) my_view
+
+  Notes:
+   (1) Generator: expression to generate zero or more rows (aka, lateral view
+       + explode, explode_outer
+       + posexplode, posexplode_outer
+       + inline, inline_outer
+       + json_tuple
+       + stack
+       ref: https://jaceklaskowski.gitbooks.io/mastering-spark-sql/spark-sql-Expression-Generator.html
+   (2) split() can not be used in LATERAL VIEW, reason: split is expected to be a generator. 
+       However, its class is org.apache.spark.sql.catalyst.expressions.StringSplit
+       , which is not a generator.
       
 
 + JOIN:
