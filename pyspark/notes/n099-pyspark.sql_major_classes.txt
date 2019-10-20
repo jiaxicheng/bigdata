@@ -178,6 +178,8 @@ spark.sql.DataFrame:
     foreachPartition(f)
   + drop(*cols)
     dropDuplicates(subset=None)  same to drop_duplicates
+     ** Notes: dropduplicates will trigger a shuffling (default partitions to 200)
+               spark.sql.shuffle.partitions = 200 by default
     dropna(how='any', thresh=None, subset=None)
   + fillna(value, subset=None)
   + replace(to_replace, value=<>, subset=None): 
@@ -190,7 +192,7 @@ spark.sql.DataFrame:
     count()
     cov(col1, col2)
     corr(col1, col2, method=None)
-    freqItems(cols, support=None)
+    freqItems(cols, 0.01) 
     crosstab(col1, col2)
     cube(*col)
     rollup(*col)
@@ -212,6 +214,8 @@ spark.sql.DataFrame:
   + toDF()
     toJSON(): return RDD of JSONs
     toLocalIterator()
+     * this brings all Rows to driver as iterator by partitions (need RAM to hold max-sized partition)
+       useful in debugging when collect() is often used.
     toPandas()
 
   Notes:
@@ -228,8 +232,18 @@ spark.sql.DataFrame:
           rdd_empty = spark.sparkContext.emptyRDD()
           df_empty  = spark.createDataFrame(rdd_empty, schema='')
 
-   (4) df.freqItems(['col1']) return an array of the freqItems from 'col1', the items in the array
+   (4) df.freqItems(['col1'], 0.5) return an array of the freqItems from 'col1', the items in the array
        are unsorted, dont expect the first item to be the most counted item
+       the 2nd argument set percentage of rows shown as frequentItem, default is 1%
+   (5) df.rdd covert the whole DF to RDD and will slow down the process, be carefulwhen you do this.
+   (6) Check if an instance is DataFrame or RDD
+
+          from pyspark.rdd import RDD
+          from pyspark.sql import DataFrame
+
+          isinstance(df, DataFrame)     True
+          isinstance(df, RDD)           False
+
 
 
 pyspark.sql.GroupedData
@@ -366,6 +380,8 @@ spark.read
       + spark-xml: https://github.com/databricks/spark-xml#python-api
     + bigquery: (untested)
       + https://github.com/GoogleCloudPlatform/spark-bigquery-connector
+    + mongodb: (untested)
+      + https://docs.mongodb.com/spark-connector/master/
   + load():
     * parameters: path, format, schema, options
   + table(tbl_name)
