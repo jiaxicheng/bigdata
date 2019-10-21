@@ -67,7 +67,14 @@ Working with JSON data and PySpark:
     + When if you can set up the schema, missing keys are fine, they will be filled with null
 
   + pyspark.sql.json_tuple(col, *fields)
-    + When: you have an JSON array and want to explode it into Rows (similar to explode/str_to_map) 
+    + It takes a set of names (keys) and a JSON string, and returns a tuple of values using one function. 
+      This is much more efficient than calling GET_JSON_OBJECT to retrieve more than one key from a single 
+      JSON string. In any case where a single JSON string would be parsed more than once, your query will 
+      be more efficient if you parse it once, which is what JSON_TUPLE is for. 
+
+      As JSON_TUPLE is a UDTF, you will need to use the LATERAL VIEW syntax in order to achieve the same goal.
+
+      Notes: this does NOT work on a JSON array
 
   + pyspark.sql.functions.schema_of_json(json)
     + generate the schema of the corresponding json string in the DDL format (`simpleString`)
