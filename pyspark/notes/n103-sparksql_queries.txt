@@ -21,6 +21,13 @@ SELECT [hints, ...] [ALL|DISTINCT] named_expression[, named_expression, ...]
   [LIMIT num_rows]
 
 
++ CTE(Common Table Expression):
+  + an example using CTE: (using split)
+
+      WITH v AS (SELECT bdate, hours, split(hours, "[-:]") AS h FROM tbl_df) 
+      SELECT bdate, hours, (h[2]-h[0] + IF(h[2]<h[0],24,0)) AS h1 FROM v 
+
+
 + FROM:
   + VALUES (this can not be used with JOIN)
 
@@ -29,19 +36,28 @@ SELECT [hints, ...] [ALL|DISTINCT] named_expression[, named_expression, ...]
   + LATERAL_VIEW
 
       SELECT * FROM df_tbl LATERAL VIEW inline_outer(struct_c) my_view
-      SELECT struct_c.a, my_view.* FROM df_tbl LATERAL VIEW OUTER explode(array_b) my_view
+      SELECT struct_c.a, my_view.val FROM df_tbl LATERAL VIEW OUTER explode(array_b) my_view AS val
+      SELECT t.key, b.f1, b.f2  from t_df t LATERAL VIEW OUTER json_tuple(jstring, 'f1', 'f2') b as f1, f2
 
   Notes:
-   (1) Generator: expression to generate zero or more rows (aka, lateral view
+   (1) Generator: expression to generate zero or more rows (aka, lateral view)
        + explode, explode_outer
        + posexplode, posexplode_outer
        + inline, inline_outer
-       + json_tuple
+       + json_tuple: <-- json_tuple does not generate new rows.
        + stack
        ref: https://jaceklaskowski.gitbooks.io/mastering-spark-sql/spark-sql-Expression-Generator.html
    (2) split() can not be used in LATERAL VIEW, reason: split is expected to be a generator. 
        However, its class is org.apache.spark.sql.catalyst.expressions.StringSplit
        , which is not a generator.
+
+   Example CTE + LATERAL_VIEW https://stackoverflow.com/questions/58479019
+
+       spark.sql(''' 
+           WITH d AS (SELECT *, from_json(arg3, 'array<struct<name:string,datetime:string,event:string>>') t FROM t_df) 
+           SELECT d.arg1, d.arg2, d.arg3, e.* FROM d LATERAL VIEW OUTER inline(d.t) e 
+       ''').show()  
+
       
 
 + JOIN:
