@@ -27,16 +27,19 @@ Functions only in Spark SQL, not in DataFrame API
  + higher-order functions: transform, exists, filter, aggregate, zip_with
  + XML related: xpath, xpath_boolean, xpath_double, xpath_float, xpath_int
               , xpath_long, xpath_number, xpath_short, xpath_string
+        example: https://github.com/jiaxicheng/stackoverflow/blob/master/pyspark/068-pyspark-sql-xml_xpath_functions.txt
  + parse_url: similar to XML pather, this can retrieve HOST, QUERY etc from a valid URL
  + inline, inline_outer: similar to explode, explode_outer (array of structs)
    (explode + dereference) should be used with select/selectExpr
    withColumn will not working when multiple fields exist in structs
  + named_struct: like struct, map, array, very useful
  + str_to_map: like split, but create a MapType() from string
+        example: https://github.com/jiaxicheng/bigdata/blob/master/pyspark/notes/n095-pyspark-extractall.txt
  + percentile: can be used to calculate exact median
  + stack: can be used to demornalize a df
  + find_in_set: 
  + sentences: split paragraph into array of arrays (sentences of words)
+     example: https://stackoverflow.com/questions/58330928#58332005
  + elt: similar to choose() in Pentaho
  + java_method, reflect: only applied to static method from Java/Scala [1]
  + functions from Apache Hive:
@@ -49,6 +52,20 @@ Functions only in Spark SQL, not in DataFrame API
    + count_min_sketch
    + uuid
    + input_file_block_start, input_file_block_length
+
+ Notes:
+  (1) parse_url(string url, string partToExtract[, string keyToExtract])
+      Returns the specified part from the URL. Valid values for partToExtract include:
+      `HOST`, `PATH`, `QUERY`, `REF`, `PROTOCOL`, `AUTHORITY`, `FILE`, and `USERINFO`
+      examples: 
+
+        parse_url('http://facebook.com/path1/p.php?k1=v1&k2=v2#Ref1', 'HOST') returns 'facebook.com'. 
+        parse_url('http://facebook.com/path1/p.php?k1=v1&k2=v2#Ref1', 'QUERY', 'k1') returns 'v1'.
+
+  (2) sentences can take optionally 2nd and 3rd argument for locale:
+
+        sentences(string str, string lang, string locale)  return array<array<string>>
+
 
 
 Functions only in SparkSQL which can be simulated with DF API:
@@ -96,8 +113,10 @@ Exist in both but using different names:
 Exist in both but work differently
 ---
  + regexp_replace(), regexp_extract():
-   DF version support PCRE regex, can use \1, \2 in pattern and $1, $2 in replacement
+   DF version support Java-based PCRE regex, can use \1, \2 in pattern and $1, $2 in replacement
    Spark SQL version does not support PCRE
+   Python re module use in udf function has some different features then Java-based regex with regexp_* function
+   for example, non-fix-sized lookbdhind (?<![a-z]{0,5}) is supported in `regexp_replace()`, but not in `re.sub()`.
  + `column` as function arguments: 
    many of the DF-API functions only support scalar argument, i.e. date_add(d, N)
    the 2nd argument must be an integer, in Spark SQL, this can be a column. This makes
@@ -116,6 +135,22 @@ Some notes:
   (3) Spark SQL RLIKE is case-sensitive, the following regex, will match only 'Z' without using `(?i)`
   
         filter(text, x -> x rlike "^(?i)Z?[0-9]{4,6}$")
+
+
+Some useful functions in Apche Hive but missing in Spark SQL:
+---
+ + statistics:
+   +ngram: ngrams(array<array<string>>, int N, int K, int pf), returns `array<struct<string,double>>`
+       Returns the top-k N-grams from a set of tokenized sentences, such as those returned by the sentences() 
+   + context_ngrams(): 2nd argument is an array identify context
+   + histogram_numeric(col, b): Computes a histogram of a numeric column in the group using b 
+       non-uniformly spaced bins. The output is an array of size b of double-valued (x,y) coordinates that 
+       represent the bin centers and heights: array<struct<{x,y}>>
+   Some examples: https://cwiki.apache.org/confluence/display/Hive/StatisticsAndDataMining
+ + data masking functions: mask(), mask_first_n(), mask_last_n(), mask_hash() etc.
+ + parse_url_tuple: similar to parse_url, but can take multiple keys. this is semilar to json_tuple to get_json_object
+ + create_union(): Spark does not support union data type
+ + surrogate_key(): used in ACID table insertion. Spark is not designed for ACID
 
 
 References:
