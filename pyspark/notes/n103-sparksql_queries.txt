@@ -2,7 +2,7 @@
 Some notes/collections about using the SparkSQL DML and their DataFrame API correspondences
 
 #==================================
-#          Spark SQL DML
+#          Spark SQL Queries
 #==================================
 
 
@@ -41,12 +41,16 @@ SELECT [hints, ...] [ALL|DISTINCT] named_expression[, named_expression, ...]
 
   Notes:
    (1) Generator: expression to generate zero or more rows (aka, lateral view)
-       + explode, explode_outer
-       + posexplode, posexplode_outer
-       + inline, inline_outer
+       + explode, explode_outer: ArrayType, MapType
+       + posexplode, posexplode_outer: ArrayType, MapType
+       + inline, inline_outer: Array of StructType
        + json_tuple: <-- json_tuple does not generate new rows.
        + stack
        ref: https://jaceklaskowski.gitbooks.io/mastering-spark-sql/spark-sql-Expression-Generator.html
+       UDTF (User Defined Table Function) limitations:
+         + not allowed in SELECT, so in LATERAL VIEW
+         + can not be nested, can not be used within another function
+         + groupby, sortby, cluster by, distributed by are not supported
    (2) split() can not be used in LATERAL VIEW, reason: split is expected to be a generator. 
        However, its class is org.apache.spark.sql.catalyst.expressions.StringSplit
        , which is not a generator.
