@@ -1,0 +1,59 @@
+Regex to parse Apache Weblog( using Apache Hive's RegexSerDe):
+
+    regexp_replace + split --> convert to dtype of 'array<string>'
+
+From Apache Hive's RegexSerDe:
+https://cwiki.apache.org/confluence/display/Hive/LanguageManual+DDL
+https://issues.apache.org/jira/browse/HIVE-662
+
+    CREATE TABLE serde_regex(
+      host STRING,
+      identity STRING,
+      user STRING,
+      time STRING,
+      request STRING,
+      status STRING,
+      size STRING,
+      referer STRING,
+      agent STRING)
+    ROW FORMAT SERDE 'org.apache.hadoop.hive.contrib.serde2.RegexSerDe'
+    WITH SERDEPROPERTIES (
+      "input.regex" = "([^ ]*) ([^ ]*) ([^ ]*) (-|\\[[^\\]]*\\]) ([^ \"]*|\"[^\"]*\") (-|[0-9]*) (-|[0-9]*)(?: ([^ \"]*|\"[^\"]*\") ([^ \"]*|\"[^\"]*\"))?",
+      "output.format.string" = "%1$s %2$s %3$s %4$s %5$s %6$s %7$s %8$s %9$s"
+    )
+    STORED AS TEXTFILE;
+
+We can use this regex to parse Apache Weblog and convert log entries into dataframe columns:
+
+Example-1: small modification to the above regex:
+
+    from pyspark.sql.functions import split, regexp_replace, col
+
+    df = spark.createDataFrame([('10.185.248.71 - - [09/Jan/2015:19:12:06 +0000] "GET /inventoryService/inventory/purchaseItem?userId=20253471&itemId=23434300 HTTP/1.1" 500 17 "-" "Apache-HttpClient/4.2.6 (java 1.5)"',)],['log_entry'])
+
+    input_regex = r'(\S+) (\S+) (\S+) (-|\[[^]]*\]) ([^ "]+|"[^"]*") (-|\d+) (-|\d+)(?: ([^ "]+|"[^"]*") ([^ "]+|"[^"]*"))?'
+
+    cols = ['host', 'time', 'request', 'status', 'size', 'referer', 'agent']
+
+    df.select(split(regexp_replace('log_entry', input_regex, '$1\0$4\0$5\0$6\0$7\0$8\0$9'), '\0').alias('log_array')) \ 
+      .select([ col('log_array')[i].alias(cols[i]) for i in range(len(cols)) ]) \
+      .show(truncate=False)
+
+    df_new = df.select(
+          split(regexp_replace('log_entry', input_regex, '$1\0$4\0$5\0$6\0$7\0$8\0$9'), '\0').alias('log_array')
+        ).select([ col('log_array')[i].alias(cols[i]) for i in range(len(cols)) ])
+
+    df_new.show()
+    +-------------+--------------------+--------------------+------+----+-------+--------------------+
+    |         host|                time|             request|status|size|referer|               agent|
+    +-------------+--------------------+--------------------+------+----+-------+--------------------+
+    |10.185.248.71|[09/Jan/2015:19:1...|"GET /inventorySe...|   500|  17|    "-"|"Apache-HttpClien...|
+    +-------------+--------------------+--------------------+------+----+-------+--------------------+
+
+Notes:
+ (1) Apache Weblog can be customized, need to adjust the regex pattern to fit the actual log format.
+ (2) Common sub-patterns:
+    + `[^ "]+|"[^"]*"`: field can be enclosed by double-quotes, or just non-spaces
+    + `-|\d+`: numbers or `-`
+    + `-|\[[^]]*\]`: text enclosed by `[` and `]`
+
