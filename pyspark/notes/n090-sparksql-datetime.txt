@@ -6,16 +6,16 @@ built-in functions:
   + current_date:
   + current_timestamp() = now()
   + type casting
-    + timestamp(ts/string), cast(ts as 'timestamp')
+    + timestamp(ts/string), cast(ts as 'timestamp')     <-- this can keep the microsecond
     + date(ts/string), cast(ts as 'date')
   + useful functions:
     + string add_months(d, N)                                               <-- exact month
       + HiveQL has one more argument `fmt`
     + string next_day(d, fmt): fmt can be: ['MO', 'TU', .. 'SA', 'SU']
     + string last_day(d)
-    + string trunc(d, fmt): Supported formats: MONTH/MON/MM, YEAR/YYYY/YY
+*    + string trunc(d, fmt): Supported formats: MONTH/MON/MM, YEAR/YYYY/YY
       * compatible with HiveQL
-    + timestamp date_trunc(fmt, ts): 
+*    + timestamp date_trunc(fmt, ts): 
        fmt can be one of ["YEAR", "YYYY", "YY", "MON", "MONTH", "MM", "DAY", "DD"
                          , "HOUR", "MINUTE", "SECOND", "WEEK", "QUARTER"]
     + date date_add(d, N)  
@@ -52,6 +52,8 @@ built-in functions:
 Notes: 
   (1) In from_utc_timestamp/to_utc_timestamp,  `d` can be {any primitive type}* = including timestamp/date
       , tinyint/smallint/int/bigint, float/double, decimal
+  (2) date_trunc(fmt, ts) convert timestamp to timestamp, when you need a `Timestamp`
+      trunc convert DateType into a StringType: when you need a `Date`
 
 
 Some References: 
