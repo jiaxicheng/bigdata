@@ -1,0 +1,49 @@
+Some common issues using DataFrame API functions (udf or non-udf)
+
+
+Common errors:
+(1) use if-elif-else, while when().when().otherwise() is required
+
+    ERROR: https://stackoverflow.com/questions/58347116
+    ---
+
+        def next_date(column,date,dayOfWEek):
+          if column == -1:
+            return date_sub(next_day(date,dayOfWEek),0)
+          elif column == 1:
+            return date_sub(next_day(date,dayOfWEek),7)
+          else:
+            return date
+
+    Fixed:
+    --- 
+        def next_date(column,date,dayOfWEek):
+          return when(column == -1, date_sub(next_day(date,dayOfWEek),0)) \
+            .when(column == 1, date_sub(next_day(date,dayOfWEek),7)) \
+            .otherwise(date)
+
+
+(2) Use Spark dataframe in udf function or RDD.map function etc
+    Solution: Do NOT use Spark dataframe inside the UDF or RDD map functions
+
+    REF  : https://stackoverflow.com/questions/58348612
+    ERROR: Spark __getnewargs__ error,
+    ---
+
+        def _get_tb_db(db, tb):
+          df = spark.sql("select * from {}.{}".format(db, tb))
+          return df.dtypes
+
+        test = udf(lambda db, tb: _get_tb_db(db, tb), StringType())
+
+    Fixed: 
+    ---
+    You can not pass spark dataframe into a UDF. pyspark dataframe can not be pickled.
+    doing computation on a dataframe inside a UDF is not acceptable.
+    check the post for different work-around
+
+    Notes-2: pyspark.sql.functions can NOT be used in udf.
+
+
+
+
