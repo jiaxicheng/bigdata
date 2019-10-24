@@ -1,6 +1,10 @@
 Using the metadata from df.schema:
 
 to adjust, convert or save the data-type definitions of the fields or the whole data frame:
+---
+ + change datatype of a structfield or an arrayitem  inside a complex data type
+ + discard some unwanted fields in a structtype
+ + retrieve fieldname of any StructType field
 
 
 df.schema:
@@ -48,6 +52,21 @@ Notes:
 
         DoubleType().needConversion()     <-- False
         TimestampType().needConversion()  <-- True
+
+ (5) Spark Complex Data Types used with schema, examples in DDL:
+     
+        ArrayType :    myarr    array<string>
+        MapType   :    mymap    map<string,int>
+        StructType:    mystruct struct<f1:string,f2:int>
+   
+        CREATE TABLE my_tbl (myarr array<string>, mymap map<string,int>, mystruct struct<f1:string,f2:int>);
+ 
+
+** Some more metadata information: using spark._jsparkSession
+
+    tid = spark._jsparkSession.sessionState().sqlParser().parseTableIdentifier('my_tbl')
+    metadata = spark._jsparkSession.sessionState().catalog.getTableMetadata(tid) 
+    https://stackoverflow.com/questions/58537239/how-to-retrieve-metadata-of-the-table-in-pyspark
 
 
 
