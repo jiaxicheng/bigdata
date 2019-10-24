@@ -113,10 +113,15 @@ Exist in both but using different names:
 Exist in both but work differently
 ---
  + regexp_replace(), regexp_extract():
-   DF version support Java-based PCRE regex, can use \1, \2 in pattern and $1, $2 in replacement
-   Spark SQL version does not support PCRE
-   Python re module use in udf function has some different features then Java-based regex with regexp_* function
-   for example, non-fix-sized lookbdhind (?<![a-z]{0,5}) is supported in `regexp_replace()`, but not in `re.sub()`.
+   Notes: 
+    (1) DF version support Java-based PCRE regex, can use \1, \2 in pattern and $1, $2 in replacement
+     Spark SQL version does not support PCRE
+    (2) Python re module use in udf function has some different features than Java-based regex with regexp_* function
+      + Example-1: non-fix-sized lookbdhind (?<![a-z]{0,5}) is supported in `regexp_replace()`, but not in `re.sub()`
+      + Example-2: Java-based regex use `+` to set non-backtrack, so that `(?:Col1)?+.+`, `?+` matches 0 or 1 times 
+                   without backtracking. Python-based regex does not support this
+    (3) in DF, do not pre-complie regex using re.compile(), this yields the following error:
+         AttributeError: 're.Pattern' object has no attribute '_get_object_id'
  + `column` as function arguments: 
    many of the DF-API functions only support scalar argument, i.e. date_add(d, N)
    the 2nd argument must be an integer, in Spark SQL, this can be a column. This makes
