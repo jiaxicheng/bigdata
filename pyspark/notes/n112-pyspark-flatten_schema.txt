@@ -1,0 +1,100 @@
+REF: https://stackoverflow.com/questions/58545223/flatten-nested-json-with-lists-and-dicts
+    
+Flatten a dataframe using the information retrieved from df.schema.jsonValue()
+    
+Example (requirement see the above linked SO post):
+
+    df = spark.read.json('/home/xichengjia/test/json-1.txt') 
+    
+    df = df.withColumn('m1', F.expr("map('a',1,'b',2,'c',3)"))
+    
+    >>> df.printSchema()
+    root
+     |-- metaHeader: struct (nullable = true)
+     |    |-- messageIdentifier: string (nullable = true)
+     |-- projectResults: struct (nullable = true)
+     |    |-- projectResultsHeader: struct (nullable = true)
+     |    |    |-- COANumber: string (nullable = true)
+     |    |    |-- projectNumber: string (nullable = true)
+     |    |-- testResultDetails: struct (nullable = true)
+     |    |    |-- SampleDetails: array (nullable = true)
+     |    |    |    |-- element: struct (containsNull = true)
+     |    |    |    |    |-- ItemNumber: string (nullable = true)
+     |    |    |    |    |-- productDescription: string (nullable = true)
+     |    |    |    |    |-- sampleNumber: string (nullable = true)
+     |    |    |    |    |-- supplierFacilityID: string (nullable = true)
+     |    |    |    |    |-- testResults: array (nullable = true)
+     |    |    |    |    |    |-- element: struct (containsNull = true)
+     |    |    |    |    |    |    |-- testResultsList: array (nullable = true)
+     |    |    |    |    |    |    |    |-- element: struct (containsNull = true)
+     |    |    |    |    |    |    |    |    |-- reportedValue: string (nullable = true)
+     |    |    |    |    |    |    |    |    |-- resultreportedname: string (nullable = true)
+     |    |    |    |    |    |    |    |    |-- unit: string (nullable = true)
+     |-- m1: map (nullable = false)
+     |    |-- key: string
+     |    |-- value: integer (valueContainsNull = false)
+    
+    
+    # function to flatten ArrayType, MapType and StructType columns
+    # using the Python object df.schema.jsonValue()
+    def flatten(df, keep_path=False):
+        """ 
+        Use the Python object returned by df.schema.jsonValue() to flatten a dataframe.
+        currently processed data types: ArrayType, MapType and StructType
+        params:
+          df       : dataframe
+          keep_path: whether to keep the original column name as prefix in 
+                     the new column name of a StructField, default False
+        """
+        while 1:
+          cols, need_extend = [], 0 
+          for f in df.schema.jsonValue()['fields']:
+            if isinstance(f['type'],dict):
+              if f['type']['type'] == 'struct':
+                fmt = '`{0}`.`{1}` as `{0}.{1}`' if keep_path else '`{0}`.`{1}`'
+                cols.extend([ fmt.format(f['name'], g['name']) for g in f['type']['fields'] ])
+              elif f['type']['type'] == 'map':
+                cols.append('explode_outer(`{0}`) as (`{0}_key`,`{0}_value`)'.format(f['name']))
+              elif f['type']['type'] == 'array':
+                cols.append('explode_outer(`{0}`) as `{0}`'.format(f['name']))
+    	      need_extend += 1
+            else:
+              cols.append('`{}`'.format(f['name']))
+          if need_extend:  
+            df = df.selectExpr(cols)
+          else:
+            return df
+    
+    
+    # flatten dataframe
+    >>> flatten(df).printSchema()                                                                              
+    root
+     |-- messageIdentifier: string (nullable = true)
+     |-- COANumber: string (nullable = true)
+     |-- projectNumber: string (nullable = true)
+     |-- ItemNumber: string (nullable = true)
+     |-- productDescription: string (nullable = true)
+     |-- sampleNumber: string (nullable = true)
+     |-- supplierFacilityID: string (nullable = true)
+     |-- reportedValue: string (nullable = true)
+     |-- resultreportedname: string (nullable = true)
+     |-- unit: string (nullable = true)
+     |-- m1_key: string (nullable = false)
+     |-- m1_value: integer (nullable = false)
+    
+    # keep the path to the new field names
+    >>> flatten(df,1).printSchema()                                                                            
+    root
+     |-- metaHeader.messageIdentifier: string (nullable = true)
+     |-- projectResults.projectResultsHeader.COANumber: string (nullable = true)
+     |-- projectResults.projectResultsHeader.projectNumber: string (nullable = true)
+     |-- projectResults.testResultDetails.SampleDetails.ItemNumber: string (nullable = true)
+     |-- projectResults.testResultDetails.SampleDetails.productDescription: string (nullable = true)
+     |-- projectResults.testResultDetails.SampleDetails.sampleNumber: string (nullable = true)
+     |-- projectResults.testResultDetails.SampleDetails.supplierFacilityID: string (nullable = true)
+     |-- projectResults.testResultDetails.SampleDetails.testResults.testResultsList.reportedValue: string (nullable = true)
+     |-- projectResults.testResultDetails.SampleDetails.testResults.testResultsList.resultreportedname: string (nullable = true)
+     |-- projectResults.testResultDetails.SampleDetails.testResults.testResultsList.unit: string (nullable = true)
+     |-- m1_key: string (nullable = false)
+     |-- m1_value: integer (nullable = false)
+    
