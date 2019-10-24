@@ -37,6 +37,8 @@ pyspark.sql.SparkSession:
      + an RDD of any kind of SQL data representation
      + list
      + pandas.DataFrame
+   (3) newSession() and stop() are two methods which you need to start a new SparkSession
+       spark1 = SparkSession.builder.getOrCreate() will get the same sparksession as existing one
     
 
 
@@ -153,6 +155,13 @@ spark.sql.DataFrame:
     take(N):   return a list of Row objects
     show(N=20, truncate=False, vertical=False)
   + colRegex(regex)
+    Notes: regex is Java-based and must be enclosed by backticks and preferred using Raw string: r'`...`', 
+           example (all columns except col_name == 'param'): 
+
+              df.colRegex(r'`^(?!param$).+`')
+              df.colRegex(r'`(?:param)?+.+`')       `?+`: match 0 or 1 times and never backtrack
+
+           this returns a Column object not a list of columns: Column<b'unresolvedregex()'>
   + crossJoin(df2)
     join(df2, on=None, how='inner')
     exceptAll(df2)
@@ -208,6 +217,17 @@ spark.sql.DataFrame:
     createOrReplaceGlobalTempView(name)
     createOrReplaceTempView(name)
     createTempView(name)
+      Notes: 
+       (1) GlobalTempView's lifespan is till the application terminated, TempView is the current SparkSession
+       (2) GlobalTempView must be accessed through `global_temp`, TempView does not need a namespace:
+
+              df.createTempView('dummy1')
+              spark.sql('select * from dummy1').show()
+              spark.newSession().sql('select * from dummy1').show()   <-- NOT working
+              df.createOrReplaceGlobalTempView('dummy')
+              spark.sql('select * from global_temp.dummy').show()
+              spark.newSession().sql('select * from global_temp.dummy').show()
+
   + randomSplit(weights, seed=None)
     sample(withreplacement=False, fraction=[0,1], seed=None)
     sampleBy(col, fractions, seed=None)    <-- withreplacement=False
@@ -243,6 +263,13 @@ spark.sql.DataFrame:
 
           isinstance(df, DataFrame)     True
           isinstance(df, RDD)           False
+
+   (7) Interestingly, in df.sort(sort_cols).write.parquet(..), the sort() mathod can help divide the
+       data into k evenly-sized partitions (k = spark.sql.shuffle.partitions, default 200). sorted
+       data can also help reduce data size(when compression is used), and improve query performace
+       (for parquet, metadata max/min will help speed up query). However, sort is also expensive
+       than simplr repartition. 
+       ref: https://stackoverflow.com/questions/50775870
 
 
 
@@ -287,7 +314,7 @@ pyspark.sql.Window:
              * ntile(n): split rows into buckets of size-N, based on the orderBy() column
            REF:https://docs.microsoft.com/en-us/sql/t-sql/functions/percent-rank-transact-sql?view=sql-server-2017
        + Aggregate functions: 
-         * count(c), max(c), min(c), avg(c), mean(c), sum(c), sumDistinct(c), approxCountDistinct(c, rsd)
+         * count(c), max(c), min(c), avg(c), mean(c), sum(c), sumDistinct(c), approx_count_distinct(c, rsd)
          * kurtosis(c), skewness(c)
          * first(c, ignorenulls=False)
            last(c, ignorenulls=False)
@@ -402,6 +429,14 @@ spark.read
      + [a-b]: char range
      + {a,b}: alternation
      + \c: escape char
+  (6) most path for DataFrameReader take list of strings for input path(s) or RDD 
+      for RDD (textFile, wholeTextFile) takes only one String as path (not list)
+      but you can use shell glob to add more than one files, example:
+
+          rdd = sc.wholeTextFiles('/home/xicheng/test/{time-1.txt,merge-1.txt}')
+          rdd = sc.wholeTextFiles(','.join(list_of_files))
+
+      Notice that list of files must be joined by comma ',', semi-comma does NOT work.
 
 
 
@@ -508,6 +543,8 @@ pyspark.sql.UDFRegistration
   (4) The following two only applied to DataFrame API:
       + pyspark.sql.functions.udf(<func_def>, <return_type>)
       + pyspark.sql.functions.pandas_udf()
+  (5) All udf functions involve data serialization, deserialization and data movement between JVM 
+      and Python interpreter. [ref: https://stackoverflow.com/questions/38296609]
 
 
 
