@@ -1,0 +1,103 @@
+About PySpark Partitions:
+
+
+pyspark.RDD:
+---
+  + Get partition infor:
+    + getNumPartitions()
+    + glom()
+  + reset partitions:
+    + partitionBy(numPartitions, partitionFunc=<function portable_hash>)
+    + coalesce(numPartitions, shuffle=False)
+    + repartition(numPartitions)
+    + repartitionAndSortWithinPartitions(
+          numPartitions=None
+        , partitionFunc=<function portable_hash>
+        , ascending=True
+        , keyfunc=<function RDD.<lambda>>
+      )
+  + sorting
+    + sortBy(keyfunc, ascending=True, numPartitions=None)
+    + sortByKey(ascending=True, numPartitions=None, keyfunc=<function RDD.<lambda>>)
+  + map functions and preservesPartitioning:
+    + map(f, preservesPartitioning=False)
+    + flatMap(f, preservesPartitioning=False)
+    + mapPartitions(f, preservesPartitioning=False)
+    + mapPartitionsWithIndex(f, preservesPartitioning=False)
+  + reduce functions and numPartitions, partitionFunc
+    + aggregateByKey(zeroValue, seqFunc, combFunc, numPartitions=None, partitionFunc=<function portable_hash>)
+    + combineByKey(createCombiner, mergeValue, mergeCombiners, numPartitions=None, partitionFunc=<function portable_hash>)
+    + foldByKey(zeroValue, func, numPartitions=None, partitionFunc=<function portable_hash>)
+    + groupByKey(numPartitions=None, partitionFunc=<function portable_hash>)
+    + reduceByKey(func, numPartitions=None, partitionFunc=<function portable_hash>)
+  + groupby + join:
+    + distinct(numPartitions=None)
+    + cogroup(other, numPartitions=None)
+    + groupBy(f, numPartitions=None, partitionFunc=<function portable_hash>)
+    + fullOuterJoin(other, numPartitions=None)
+    + join(other, numPartitions=None)
+    + leftOuterJoin(other, numPartitions=None)
+    + rightOuterJoin(other, numPartitions=None)
+    + subtract(other, numPartitions=None)
+    + subtractByKey(other, numPartitions=None)
+
+  Notes:
+   (1) the function arguments: 
+       + partitionFunc=<function portable_hash>: are designed for pair-RDD and function argument is 
+            the key of the tuple (key, value). example:
+
+                  rdd.keyBy(lambda x: x[1]).partitionBy(N, lambda x: hash(x))
+
+       + keyfunc=<function RDD.<lambda>>: 
+         + applied to repartitionAndSortWithinPartitions, sortBy, sortByKey
+         + soryByKey() only applied to pair-RDD, sortBy() to tuple of any elements
+
+   (2) repartition will trigger a shuffle to redistribute data. to reduce #Partitions, 
+       consider using coalesce
+   (3) in mapPartitionsWithIndex(func): func takes two arguments 
+       func(idx, it) <-- idx is similar to spark_partition_id
+   (4) in map-related functions, preservesPartitioning is only useful for pair-RDDs when the 
+       function changes the key of RDD elements and thus potentially modify the partitions.
+       keep the default 'false' unless you are dealing with pair-RDD and the functions
+       changed the first item of the tuple.
+
+
+
+pyspark.sql.DataFrame:
+---
+  + coalesce(numPartitions)
+  + repartition(numPartitions, *cols)
+    + hash partitioned
+  + repartitionByRange(numPartitions, *cols)
+    + range partitioned
+  + sortWithinPartitions(*cols, **kwargs)
+  + foreachPartition(f)
+  + toLocalIterator()
+
+
+
+pyspark.sql.SparkSession:
+---
+  + range(start, end=None, step=1, numPartitions=None)
+
+
+pyspark.sql.DataFrameReader(spark)
+---
+  + jdbc(url, table, column=None, lowerBound=None, upperBound=None, numPartitions=None, predicates=None, properties=None)
+
+
+pyspark.sql.DataFrameWriter(df)
+---
+  + orc(path, mode=None, partitionBy=None, compression=None)
+  + partitionBy(*cols)
+
+
+pyspark.sql.functions:
+---
+  + pyspark.sql.functions.spark_partition_id()
+
+
+
+References:
+[1] https://stackoverflow.com/questions/40416357/spark-sql-difference-between-df-repartition-and-dataframewriter-partitionby/42780452#42780452
+[2] https://stackoverflow.com/questions/50775870/pyspark-efficiently-have-partitionby-write-to-same-number-of-total-partitions-a
