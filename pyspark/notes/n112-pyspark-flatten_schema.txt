@@ -2,11 +2,18 @@ REF: https://stackoverflow.com/questions/58545223/flatten-nested-json-with-lists
     
 Flatten a dataframe using the information retrieved from df.schema.jsonValue()
     
+**Note**: 
+  Only one generator (such as explode, explode_outer) allowed per select/selectExpr,
+  thus we process map and array immediately whenever one is detected
+
+
 Example (requirement see the above linked SO post):
 
-    df = spark.read.json('/home/xichengjia/test/json-1.txt') 
-    
-    df = df.withColumn('m1', F.expr("map('a',1,'b',2,'c',3)"))
+    from pyspark.sql.functions import expr
+
+    df = spark.read.json('/home/xicheng/test/json-5.txt', multiLine=True)
+
+    df = df.withColumn('m1', expr("map('a',1,'b',2,'c',3)")).withColumn('m2', expr("map('a1',12.0,'b1',0.9)"))
     
     >>> df.printSchema()
     root
@@ -33,6 +40,9 @@ Example (requirement see the above linked SO post):
      |-- m1: map (nullable = false)
      |    |-- key: string
      |    |-- value: integer (valueContainsNull = false)
+     |-- m2: map (nullable = false)
+     |    |-- key: string
+     |    |-- value: decimal(3,1) (valueContainsNull = false)
     
     
     # function to flatten ArrayType, MapType and StructType columns
@@ -45,21 +55,32 @@ Example (requirement see the above linked SO post):
           df       : dataframe
           keep_path: whether to keep the original column name as prefix in 
                      the new column name of a StructField, default False
+        variables:
+          cols       : column names to be included in the dataframe
+          need_extend: flag if any complex data type is detected 
+          cname      : column name 
+          ctype      : column data type
         """
         while 1:
           cols, need_extend = [], 0 
           for f in df.schema.jsonValue()['fields']:
-            if isinstance(f['type'],dict):
-              if f['type']['type'] == 'struct':
+            cname, ctype = f['name'], f['type']
+            if isinstance(ctype, dict):
+              if ctype['type'] == 'struct':
                 fmt = '`{0}`.`{1}` as `{0}.{1}`' if keep_path else '`{0}`.`{1}`'
-                cols.extend([ fmt.format(f['name'], g['name']) for g in f['type']['fields'] ])
-              elif f['type']['type'] == 'map':
-                cols.append('explode_outer(`{0}`) as (`{0}_key`,`{0}_value`)'.format(f['name']))
-              elif f['type']['type'] == 'array':
-                cols.append('explode_outer(`{0}`) as `{0}`'.format(f['name']))
+                cols.extend([ fmt.format(cname, h['name']) for h in ctype['fields'] ])
+              elif ctype['type'] == 'map':
+                df = df.selectExpr('explode_outer(`{0}`) AS (`{0}_key`,`{0}_value`)'.format(cname)
+                        , *[ '`{0}`'.format(c) for c in df.columns if c != cname ])  
+                cols.extend(['`{0}_key`'.format(cname), '`{0}_value`'.format(cname)])
+              else:
+                if ctype['type'] == 'array':
+                  df = df.selectExpr('explode_outer(`{0}`) AS `{0}`'.format(cname)
+                          , *[ '`{0}`'.format(c) for c in df.columns if c != cname ])  
+                cols.append('`{0}`'.format(cname))
     	      need_extend += 1
             else:
-              cols.append('`{}`'.format(f['name']))
+              cols.append('`{0}`'.format(cname))
           if need_extend:  
             df = df.selectExpr(cols)
           else:
@@ -79,8 +100,11 @@ Example (requirement see the above linked SO post):
      |-- reportedValue: string (nullable = true)
      |-- resultreportedname: string (nullable = true)
      |-- unit: string (nullable = true)
-     |-- m1_key: string (nullable = false)
-     |-- m1_value: integer (nullable = false)
+     |-- m1_key: string (nullable = true)
+     |-- m1_value: integer (nullable = true)
+     |-- m2_key: string (nullable = true)
+     |-- m2_value: decimal(3,1) (nullable = true)
+    
     
     # keep the path to the new field names
     >>> flatten(df,1).printSchema()                                                                            
@@ -95,6 +119,8 @@ Example (requirement see the above linked SO post):
      |-- projectResults.testResultDetails.SampleDetails.testResults.testResultsList.reportedValue: string (nullable = true)
      |-- projectResults.testResultDetails.SampleDetails.testResults.testResultsList.resultreportedname: string (nullable = true)
      |-- projectResults.testResultDetails.SampleDetails.testResults.testResultsList.unit: string (nullable = true)
-     |-- m1_key: string (nullable = false)
-     |-- m1_value: integer (nullable = false)
+     |-- m1_key: string (nullable = true)
+     |-- m1_value: integer (nullable = true)
+     |-- m2_key: string (nullable = true)
+     |-- m2_value: decimal(3,1) (nullable = true)
     
