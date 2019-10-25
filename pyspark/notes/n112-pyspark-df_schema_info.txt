@@ -1,4 +1,4 @@
-Using the metadata from df.schema:
+Retrieving data type information of a column or the whole dataframe from df.schema:
 
 to adjust, convert or save the data-type definitions of the fields or the whole data frame:
 ---
@@ -24,9 +24,9 @@ df.schema:
     + simpleString():  
       + return a string: 'struct<id:int,email:string,date_purchased:date>'
     + json():
-      + put the DataType() metadata into a JSON string
+      + put the DataType() into a JSON string
     + jsonValue():
-      + put the DataType() metadata into a JSON Value which is a Python object
+      + put the DataType() into a JSON Value which is a Python object
     + fromInternal(), toInternal(), needConversion()
       + three are connected, use-case is limited, only DateType, TimeStampType might be useful
         most of simple DataType has needConversion() == False
@@ -34,7 +34,7 @@ df.schema:
 
 Notes:
  (1) the return of df.schema.jsonValue() is an Python object which can be very useful to 
-     programmingly retrieve metadata of all column information in the dataframe
+     programmingly retrieve all column information in the dataframe
      including dtypes, field_name of StructType() columns
  (2) fromJson() class method can be used to reassign the dtype of a compound datatype:
      StructType, ArrayType, MapType, StructField (outermost DataType)
@@ -61,13 +61,51 @@ Notes:
    
         CREATE TABLE my_tbl (myarr array<string>, mymap map<string,int>, mystruct struct<f1:string,f2:int>);
  
+#####
+data structs used in df.schema.jsonValue():
+---
+&struct_field StructField:
+  name: f_name
+  type: DataType()
+  nullable: True
+  metadata: {}
 
-** Some more metadata information: using spark._jsparkSession
+StructType:
+  name: s_name
+  type: {
+    type: 'struct',
+    fields: [*struct_field]
+  }
+  nullable: True
+  metadata: {}
+
+ArrayType:
+  name: a_name
+  type: 
+    type: 'array'
+    elementType: 
+      type: DataType()
+      fields: [*struct_field]
+    containsNull: True
+  nullable: True
+  metadata: {}
+
+MapType:
+  name: m_name
+  type: 
+    type: 'map'
+    keyType: DataType()
+    valueType: DataType()
+    valueContainsNull: False
+  nullable: False
+  metadata: {}
+
+******
+Some more metadata information: using spark._jsparkSession
 
     tid = spark._jsparkSession.sessionState().sqlParser().parseTableIdentifier('my_tbl')
     metadata = spark._jsparkSession.sessionState().catalog.getTableMetadata(tid) 
     https://stackoverflow.com/questions/58537239/how-to-retrieve-metadata-of-the-table-in-pyspark
-
 
 
 Example-1: using df.schema.jsonValue() to map column names with corresponding dataType which can be
@@ -184,8 +222,5 @@ Example-6: use the existing df.schema to assign another df's schema with some ex
     # correct method is as following: 
     # create a new schema from existing f.schema.jsonValue(), then add new fields.
     schema = StructType.fromJson(df.schema.jsonValue()).add('cs', 'double')
-
-
-
 
 
