@@ -18,6 +18,7 @@ pyspark.sql.SparkSession:
   + builder
     + appName()
     + config(key=None, value=Nonee, conf=None)
+      ** use either key/value pairs or conf= and existing SparkConf()
     + master()
     + getOrCreate()
     + enableHiveSupport()
@@ -39,7 +40,14 @@ pyspark.sql.SparkSession:
      + pandas.DataFrame
    (3) newSession() and stop() are two methods which you need to start a new SparkSession
        spark1 = SparkSession.builder.getOrCreate() will get the same sparksession as existing one
-    
+   (4) set up run-time configurations 
+
+         spark = SparkSession.builder \
+                        .master('local[*]') \
+                        .appName('test') \
+                        .config("spark.sql.shuffle.partitions", 1000) \
+                        .getOrCreate()
+ 
 
 
 pyspark.sql.Catalog:
@@ -270,8 +278,10 @@ spark.sql.DataFrame:
        (for parquet, metadata max/min will help speed up query). However, sort is also expensive
        than simplr repartition. 
        ref: https://stackoverflow.com/questions/50775870
-
-
+   (8) persist/cache and broadcast: 
+       + use persist/cache when a transformation is reused in multiple calculations
+       + use broadcast in join when the dataframe is small and network traffic is not a bottleneck
+       
 
 pyspark.sql.GroupedData
 ---
