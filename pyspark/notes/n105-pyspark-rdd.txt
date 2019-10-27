@@ -13,6 +13,9 @@ Basic:
     * entry point for working with structured data (rows and columns) in Spark 1.x
   + SparkConf: for configuring Spark
   + SparkFiles: access files shipped with jobs
+    two methods to retrieve file and path info on each worker
+     + get(filename)
+     + getRootDirectory() 
   + TaskContext: 
 
 
@@ -43,6 +46,17 @@ pyspark.SparkContext:
         the resulting RDD is a paired-RDD with key=offset_of_the_delimiter, value=split_text_block
       + sequenceFile()
       + pickleFile()
+    + addFile(path, recursive=False)
+      addPyFile(path)
+       Notes: 
+        (1) add a file to be downloaded with spark job on every node.
+        (2) to fetch the file use the following code:
+
+               from pyspark import SparkFiles
+               sc.addFile('/local/path/' + 'test.txt')
+               with open(SparkFiles.get('test.txt'), 'rb') as fp:
+                   # do something on fp.readline()
+
     + union(rdds)
       build the union of a list of RDDs
     + stop()
@@ -125,13 +139,14 @@ pyspark.RDD:
     countApprox(timeout, confidence=0.95)
     meanApprox(timeout, confidence=0.95)
     sumApprox(timeout, confidence=0.95)
-  + zip(other): 
+  + zip(other): not_very_useful
     zipWithIndex(): index, no-gap, trigger a Spark job
     zipWithUniqueId(): unique-id, create gaps between partitions
   + name(): return the name of this RDD
     setName()
     id()
     glom()
+    isEmpty()
 ^  + histogram(bucket)
 ^  + barrier()
     Mark the current stage as a barrier stage where Spark must launch all tasks together.
@@ -145,8 +160,10 @@ pyspark.RDD:
     getStorageLevel()
     toDebugString()
     toLocalIterator()
+      ** Notes: this also exists as df.toLocalIterator(), it brings all Rows to driver as iterator 
+       by partitions (need RAM to hold max-sized partition) useful in debugging when collect() 
+       is often used. check also `df.explain()`
   + isCheckpointed()
-    isEmpty()
     isLocallyCheckpointed()
   + saveAsHadoopDataset
     saveAsHadoopFile
@@ -189,6 +206,10 @@ Notes:
       when the function might change the key thus potentially modify the partitions.
       keep the default 'false' unless you are dealing with pair-RDD and the functions
       changed the first item of the tuple.
+  (6) groupBy example to find top-N elements of each key:
+       
+        from heapq import nlargest
+        rdd.groupBy(lambda x: x[0]).flatMap(lambda x: nlargest(3, x[1], key=lambda x: x[2]))
 
 
 
