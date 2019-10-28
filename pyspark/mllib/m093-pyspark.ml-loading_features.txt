@@ -1,0 +1,91 @@
+Some common steps to consider when creating the features vector and label column 
+(target for a claasification task):
+---
+Including the common transformer/estimators used in creating and preprocessing the label
+and features columns.
+
+    from pyspark.ml import Pipeline
+
+    stages = []
+
+
+(1) Label encoding: 
++ useful transformers/estimators:
+  + stringIndexer: (multi-class)
+  + Binarizer: (binominal)
+  + Bucketizer: 
+  + QuantileDiscretizer
+
+    # convert label column to indices
+    labelIndexer = stringIndexer(inputCol="targetCol", outputCol="label")
+    stages += [ labelIndexer ]
+
+
+
+(2) Categorical Columns:
+---
+  + userful transformers/estimators:
+    + StringIndexer + OneHotEncoder: one StringType column at a time
+    + CountVectorizer: one ArrayType column
+
+
+    from pyspark.ml.feature import OneHotEncoder, StringIndexer
+
+    categoricalCols = ['c1', 'c2', 'c3']
+
+    for categoricalCol in categoricalCols:
+        # Category Indexing with StringIndexer
+        stringIndexer = StringIndexer(inputCol=categoricalCol, outputCol=categoricalCol+'Idx')
+
+        # Use OneHotEncoder to convert categorical variables into binary SparseVectors
+        encoder = OneHotEncoder(inputCol=categoricalCol+'Idx', outputCol=categoricalCol+'Vec')
+
+        stages += [ stringIndexer, encoder ]
+
+
+
+(3) Numerical Columns:
+---
+  + common transformers/estimators: 
+    + Missing data: Imputer
+    + Rescaling: StandardScaler, MaxAbsScaler, MinMaxScaler
+
+
+    from pyspark.ml.feature import Imputer, StandardScaler
+
+    numericalCols = ['n1', 'n2', 'n3']
+    imputer = Imputer(inputCols=numericalCols, outputCols=numericalCols, strategy='mean')
+
+    stages += [ imputer ]
+
+    for numericalCol in numericalCols:
+        scaler = StandardScaler(inputCol=numericalCol, outputCol=numericalCol+'Vec')
+        stages += [ scaler ]
+
+
+
+Assemble all categorical + numeric columns into features
+---
+  + common transformers/estimators:
+    + VectorAssembler: merge multiple columns into `features` column
+    + VectorIndexer: adjust numerical to categorical using maxCategories
+
+
+    from pyspark.ml.feature import VectorAssembler
+
+    assemblerInputCols = [ c+'Vec' for c in categoricalCols + numericalCols ]
+    assembler = VectorAssembler(inputCols=assemblerInputCols, outputCol="features")
+    stages += [ assembler ]
+
+
+
+Create and run the pipelineModel:
+
+    pipeline = Pipeline(stages=stages)
+    pipelineModel = pipeline.fit(trainingDF)
+    trainingData = pipelineModel.transform(trainingDF)
+
+
+
+Reference:
+[1] https://databricks-prod-cloudfront.cloud.databricks.com/public/4027ec902e239c93eaaa8714f173bcfc/1526931011080774/3624187670661048/6320440561800420/latest.html
