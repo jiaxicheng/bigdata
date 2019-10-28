@@ -46,6 +46,8 @@ pyspark.SparkContext:
         the resulting RDD is a paired-RDD with key=offset_of_the_delimiter, value=split_text_block
       + sequenceFile()
       + pickleFile()
+      + binaryFiles(path, minPartitions=None)
+        binaryRecords(path, recordLength)
     + addFile(path, recursive=False)
       addPyFile(path)
        Notes: 
@@ -56,9 +58,27 @@ pyspark.SparkContext:
                sc.addFile('/local/path/' + 'test.txt')
                with open(SparkFiles.get('test.txt'), 'rb') as fp:
                    # do something on fp.readline()
+        (3) addFile() also works with rdd.pipe() which you often need to upload and run a script:
+
+               sc.addFile('path/to/my_script.R')
+               rdd.pipe(SparkFiles.get('my_script.R'))
 
     + union(rdds)
       build the union of a list of RDDs
+    + runJob(rdd, partitionFunc, partitions=None, allowLocal=False)
+    + setCheckpointDir(dirName)
+      setJobDescription(value)
+      setJobGroup(groupId, description, interruptOnCancel=False)
+      setLocalProperty(key, value)
+      setLogLevel(logLevel)
+      cancelAllJobs()
+      cancelJobGroup(groupId)
+    + dump_profiles(path)
+      show_profile()
+      sparkUser()
+      getConf()
+      getLocalProperty(key)
+      statusTracker()
     + stop()
       shutdown the SparkContext
 
@@ -155,16 +175,16 @@ pyspark.RDD:
     unpersist()
   + checkpoint()
     localCheckpoint()
-  + getCheckpointFile()
-    getNumPartitions()
+    isCheckpointed()
+    isLocallyCheckpointed()
+    getCheckpointFile()
+  + getNumPartitions()
     getStorageLevel()
     toDebugString()
     toLocalIterator()
       ** Notes: this also exists as df.toLocalIterator(), it brings all Rows to driver as iterator 
        by partitions (need RAM to hold max-sized partition) useful in debugging when collect() 
        is often used. check also `df.explain()`
-  + isCheckpointed()
-    isLocallyCheckpointed()
   + saveAsHadoopDataset
     saveAsHadoopFile
     saveAsNewAPIHadoopDataset
