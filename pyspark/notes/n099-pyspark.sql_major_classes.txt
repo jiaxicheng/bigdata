@@ -281,6 +281,14 @@ spark.sql.DataFrame:
    (8) persist/cache and broadcast: 
        + use persist/cache when a transformation is reused in multiple calculations
        + use broadcast in join when the dataframe is small and network traffic is not a bottleneck
+   (9) checkpoint breaks the lineage while persist/cache keeps the lineage. It is especially useful in 
+       iterative algorithms where the plan may grow exponentially. Notice that the checkpoint
+       is lazy evaluated, thus there must be an action to actual break the lineage. 
+
+       check also: sc.setCheckpointDir(), persist(StorageLevel.DISK_ONLY)
+       REF: https://stackoverflow.com/questions/35127720
+
+
        
 
 pyspark.sql.GroupedData
@@ -427,6 +435,8 @@ spark.read
   Notes:
   (1) JSON file can use single quotes(by default), no quotes(allowUnquotedFieldNames)
   (2) csv file sep must be single-char delimiter, for multi-char or regex, might have to go through RDD methods
+      if there are multiLine for the header, you will need to customize schema (header=False, inferSchema=False 
+      are set by default)
   (3) mode=FAILFAST might not work as expected
   (4) the option `mergeSchema` is currently only applied to parquet format, for orc, avro, you can 
       explicitly specify the schema, spark will merge the result accororingly.
