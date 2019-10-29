@@ -99,3 +99,24 @@ Notes:
      API functions especially when the API function part is overly complex and the regex pattern 
      contains backtracking like `.*?`
 
+
+###############
+Another example using regexp_replace + split to handle find_all() task:
+REF: https://stackoverflow.com/questions/58605549
+
+    from pyspark.sql.functions import split, regexp_replace, expr, coalesce, array
+
+    regexp_extract_all = lambda column: \
+        split(regexp_replace(regexp_replace(column, r'.*??\b([A-Z]+[0-9]+[a-z]*)\b', '$1\0'),'\0?[^\x00]*$', ''), '\0'
+    )
+
+    df.withColumn('code', coalesce(regexp_extract_all(expr("IF(third like '%*%', second, first)")),array())).show()    
+    +-------+--------------------+-------------------+------+---------------+
+    |  first|              second|              third|   num|           code|
+    +-------+--------------------+-------------------+------+---------------+
+    |  AB12a|              xxxxxx|    some other data|100000|        [AB12a]|
+    |yyyyyyy|XYZ02, but possib...|Look at second col*|120000|[XYZ02, GFH11b]|
+    |   null|                 111|                222|  1233|             []|
+    +-------+--------------------+-------------------+------+---------------+
+
+
