@@ -107,7 +107,7 @@ REF: https://stackoverflow.com/questions/58605549
     from pyspark.sql.functions import split, regexp_replace, expr, coalesce, array
 
     regexp_extract_all = lambda column: \
-        split(regexp_replace(regexp_replace(column, r'.*??\b([A-Z]+[0-9]+[a-z]*)\b', '$1\0'),'\0?[^\x00]*$', ''), '\0'
+        split(regexp_replace(regexp_replace(column, r'.*?\b([A-Z]+[0-9]+[a-z]*)\b', '$1\0'),'\0?[^\x00]*$', ''), '\0'
     )
 
     df.withColumn('code', coalesce(regexp_extract_all(expr("IF(third like '%*%', second, first)")),array())).show()    
@@ -119,4 +119,6 @@ REF: https://stackoverflow.com/questions/58605549
     |   null|                 111|                222|  1233|             []|
     +-------+--------------------+-------------------+------+---------------+
 
+Note: The downside using regexp_replace + split is the backtracking in the main regex pattern, this potentially
+      could be very slow on large text blocks.
 
