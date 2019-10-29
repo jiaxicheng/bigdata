@@ -1,0 +1,43 @@
+https://stackoverflow.com/questions/58595189/convert-multiple-array-of-structs-columns-in-pyspark-sql
+
+using to_json and from_json to save/load dataframe with complex data types:
+
+    pickle_file = /path/to/col_dtypes.pkl
+    df_file = '/path/to/save/df_file'
+
+
+Save Dataframe to CSV file
+----------------
+Step-1: backup the col_name vs col_dtype mapping, save the data somewhere in the local-HD
+
+    from pyspark.sql.functions import to_json
+    import pickle
+
+    with open(pickle_file, 'wb') as fp:
+        pickle.dump(df.dtypes, fp)
+  
+Step-2: convert ArrayType, StructType and MapType into StringType using to_json and write the DF to csv
+
+    df.select([ to_json(d[0]).alias(d[0]) if d[1].startswith(('struct', 'array', 'map')) else d[0] for d in df.dtypes ])\
+      .write.csv(df_file, header=True)
+
+
+Load Dataframe from CSV
+-----------------
+
+Step-1: load the column dtype mapping using pickle
+
+    from pyspark.sql.functions import from_json, col
+    import pickle
+
+    # get the dtype mapping
+    with open(pickle_file, 'wb') as fp:
+        col_dtypes = pickle.load(fp)
+
+Step-2: use from_json and the above mapping to convert data back to their original dtypes:
+
+    df = spark.read.csv(df_file, header=True).select([ 
+        (from_json(d[0], d[1]) if d[1].startswith(('struct', 'array', 'map')) else col(d[0]).astype(d[1])).alias(d[0])
+            for d in col_dtypes 
+    ])
+
