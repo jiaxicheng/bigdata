@@ -45,5 +45,25 @@ Common errors:
     Notes-2: pyspark.sql.functions can NOT be used in udf.
 
 
+(3) function returning a column object(no need dataframe in argument):
+
+    See example: https://github.com/jiaxicheng/stackoverflow/blob/master/pyspark/046-sparksql-string_manipulation-1.txt
+
+    mask_email = lambda col_name, N: expr("""
+
+      IF(INSTR({0}, '@') <= {1}*2+1
+        , CONCAT(LEFT({0},1), REPEAT('*', INSTR({0}, '@')-2), SUBSTR({0}, INSTR({0}, '@')))
+        , CONCAT(LEFT({0},{1}), REPEAT('*', INSTR({0}, '@')-1-2*{1}), SUBSTR({0}, INSTR({0}, '@')-{1}))
+      ) as `{0}_masked`
+
+    """.format(col_name, N))
+
+    df.select('*', mask_email('email_col', 2)).show()
+
+
+
+
+
+
 
 
