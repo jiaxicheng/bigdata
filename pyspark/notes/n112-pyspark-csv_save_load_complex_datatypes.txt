@@ -41,3 +41,30 @@ Step-2: use from_json and the above mapping to convert data back to their origin
             for d in col_dtypes 
     ])
 
+
+Caveat: 
+-------
+the data types(schema) retrieved from df.dtypes are in simpleString format. If any field-names of 
+any StructField contain special characters (i.e. SPACE, dot etc), from_json() function will not work. 
+In such case, you might need to save df.schema.jsonValue() and use StructType.fromJson to reconstruct 
+the column dtype or manually use backticks to enclose such field names.
+
+
+Other notes:
+-------
+Using YAML file as data DeSer methods:
+
+    pip install pyyaml
+
+    import yaml
+
+    # save df.dtypes
+    yaml_file = '/home/hdfs/test/pyspark/dtype.yaml'
+    with open(yaml_file, 'w') as fp:
+        yaml.safe_dump(df.dtypes, fp)
+
+    # load df.dtypes
+    with open(yaml_file, 'r') as fp:
+        col_dtypes = yaml.safe_load(fp)
+
+
