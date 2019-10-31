@@ -1,6 +1,32 @@
 About PySpark Partitions:
 
 
+Types of partitions:
+---
+  + Hash partitioning
+    most of time, Hash partitioning is good enough. with numPartition only supplied, rows will be
+    evenly distributed. However, using specific cols/keys as partitioner, there could be significant
+    skewness in data distributions
+  + Range partitioning
+    Range partitioning need Ordering[K], and require additional data scan. This is available after Spark 2.4
+  + Round-robin 
+  Notes:
+    if the key distribution is significantly skewed
+    (1) the same key has large number or rows, no Partitioner can help
+    (2) the same hash slot gets too many rows, then adjust numPartitions, or add a new parition column
+        set the same value to the same key, so to keep them in the same bucket
+
+
+Things to consideration when partitioning:
+---
+  + data skewness:
+    know your data and how it's distributed. use an appropriate keys to repartition you
+    data to evenly sprad the load. 
+  + reading large unsplitable files, use repartition to post-split data
+  + #partitions should be proportional to #executors (the size of partition is limited by 
+    the available RAM of each executor)
+
+
 pyspark.RDD:
 ---
   + Get partition infor:
@@ -60,7 +86,16 @@ pyspark.RDD:
        function changes the key of RDD elements and thus potentially modify the partitions.
        keep the default 'false' unless you are dealing with pair-RDD and the functions
        changed the first item of the tuple.
+   (5) in the following line,  groupBy using a tuple (x[3], x[7]): 
+   
+           rdd.groupBy(lambda x: (x[3], x[7]), 100, partitionFunc=lambda x: hash(x[1]))
 
+       the parameter in `partitionFunc` must be a function of groupBy'd item which is a tuple of two items. 
+       Thus you can use hash(x[1]), hash(x), but hash(x[3]) will yield IndexError: tuple index out of range
+   (6) check number of records in each partition:
+
+           spark.range(0,100).withColumn('id', expr("IF(id<90,1,id)")).repartition(5,'id').rdd.glom().map(len).collect()
+           [1, 3, 3, 1, 92]
 
 
 pyspark.sql.DataFrame:
@@ -73,6 +108,15 @@ pyspark.sql.DataFrame:
   + sortWithinPartitions(*cols, **kwargs)
   + foreachPartition(f)
   + toLocalIterator()
+
+  Notes:
+   (1) repartition() and repartitionByRange() do not guarentee that different partition cols 
+       distributed into different partitions. partition cols can be categorical for both methods.
+       the range-boundaries are computed with a randomized algorithm called reservoir sampling
+       REF: https://www.waitingforcode.com/apache-spark-sql/range-partitioning-apache-spark-sql/read
+   (2) repartition()/repartitionByRange() is very useful when working with mapPartitions() or
+       mapPartitionsWithIndex() or foreachPartition(f)
+
 
 
 
@@ -95,7 +139,8 @@ pyspark.sql.DataFrameWriter(df)
 pyspark.sql.functions:
 ---
   + pyspark.sql.functions.spark_partition_id()
-
+    * avilable also with f(idx, rows_iterable) in df.rdd.mapPartitionsWithIndex(f) where idx is used to
+      identify spark_partition_id.
 
 
 References:
