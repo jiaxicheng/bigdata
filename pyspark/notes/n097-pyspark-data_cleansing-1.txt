@@ -1,0 +1,56 @@
+https://stackoverflow.com/questions/58651902/approach-to-cleaning-data-in-spark
+
+Basic ideas:
+(1) Use RegexTokenizer to split words (remove all punctuations and extra whitespaces) into array of strings
+(2) Use StopWordsRemover to remove stop words
+(3) Use array_distinct to remove duplicates in array
+(4) Use concat_ws to convert array back into string
+
+
+# sample code on docker-container PC
+df = spark.read.csv('/home/xicheng/test/ntlk-1.txt', sep='|', header=True)
+
+    from pyspark.ml.feature import StopWordsRemover, RegexTokenizer
+    from pyspark.sql.functions import expr
+
+    # use pattern `(?:\p{Punct}|\s)+` to split the string, save the result to `temp1` column. 
+    # The resulting array of strings will have all items in lowercase, leading/trailing spaces are also removed.
+    tk = RegexTokenizer(pattern=r'(?:\p{Punct}|\s)+', inputCol='fits_assembly_name', outputCol='temp1')
+
+    df1 = tk.transform(df)
+
+    # use StopWordsRemover to remove stopwords and save result into `temp2` column
+    # After this stage, you should have an array of strings column `temp2` with stop Words removed.
+    sw = StopWordsRemover(inputCol='temp1', outputCol='temp2')
+
+    df2 = sw.transform(df1)
+
+
+    # use array_distinct() to remove duplicates
+    # concat_ws() to convert the array into a string
+    # and then drop two temp columns:
+    df_new = df2.withColumn('fits_assembly_name', expr('concat_ws(" ", array_distinct(temp2))')) \
+                .drop('temp1', 'temp2')
+
+The example original text in fits_assembly_name:
+---
+OIL PUMP ASSEMBLY - A02EA09CA/CB/CC (4999202399920239A06)     | OIL PUMP ASSEMBLY - A06FA09CA/CB/CC (4999202399920239A06) | OIL PUMP ASSEMBLY - A02EA05CA (4999202399920239A06) | OIL PUMP ASSEMBLY - A05FA09CA/CB/CC (4999202399920239A06) | OIL PUMP ASSEMBLY - A01EA05CA (4999202399920239A06) | OIL PUMP ASSEMBLY - A01EA09CA (4999202399920239A06)    | OIL PUMP ASSEMBLY - A04KA05CA (4999202359920235A06)
+
+The result in fits_assembly_name:
+---
+oil pump assembly a02ea09ca cb cc 4999202399920239a06 a06fa09ca a02ea05ca a05fa09ca a01ea05ca a01ea09ca a04ka05ca 4999202359920235a06
+
+
+Some notes: 
+---
+ (1) type `sw.getStopWords()` to check all current stopwords
+   + check [loadDefaultStopWords(language)][3] to switch to another language setting
+   + or append your own Stopwords by:
+
+     mylist = sw.getStopWords() + ['my', 'black', 'list']
+     # then adjust the transformer to the following
+     sw = StopWordsRemover(inputCol='temp1', outputCol='temp2', stopWords=mylist)
+
+ (2) pyspark.ml.feature.Tokenizer only split on '\s+' (lowercase by default), is not useful
+     in this case
+
