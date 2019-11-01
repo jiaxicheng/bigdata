@@ -1,0 +1,163 @@
+https://stackoverflow.com/questions/58663008/fix-part-id-and-assembly-column-data-in-spark-2-4-4
+
+A very good example of using SparkSQL higher-order functions:
+
+df = spark.read.csv('/home/xicheng/test/ntlk-2.txt', sep='|', header=True) 
+---
+Itemno|Assembly_id|Assembly_name
+0450056|44011|OIL PUMP ASSEMBLY - A01EA09CA (4999202399920239A06)
+0450056|135502|OIL PUMP ASSEMBLY - A02EA09CA/CB/CC (4999202399920239A06)
+0450056|37884|OIL PUMP ASSEMBLY - A01EA05CA (4999202399920239A06)
+0450067|12345|DRIVE TRAIN, TRANSMISSION (6 SPEED) - V08AB26/GB26/LB26 ALL OPTIONS (49VICTRANS08)
+0450068|1000|SUSPENSION (7043244) - S09PR6HSL/PS6HSL/HEL (49SNOWSHOCKFRONT7043244SB)
+
+
+Step-1: convert string into array of strings
+-------
+
+split the string by the pattern `(?:(?!/)\p{Punct}|\s)+'))` which is consecutive 
+puctuation(except '/') and/or spaces, then filter the items which are EMPTY (leading/trailing).
+
+We use a temporary column `temp1` to save the intermediate columns.
+
+    from pyspark.sql.functions import split, expr
+
+    df1 = df.withColumn('temp1', split('Assembly_name', r'(?:(?!/)\p{Punct}|\s)+')) \
+            .withColumn('temp1', expr("filter(temp1, x -> x <> '')")) 
+    
+    df1.select('temp1').show(truncate=False)
+    +-------------------------------------------------------------------------------------+
+    |temp1                                                                                |
+    +-------------------------------------------------------------------------------------+
+    |[OIL, PUMP, ASSEMBLY, A01EA09CA, 4999202399920239A06]                                |
+    |[OIL, PUMP, ASSEMBLY, A02EA09CA/CB/CC, 4999202399920239A06]                          |
+    |[OIL, PUMP, ASSEMBLY, A01EA05CA, 4999202399920239A06]                                |
+    |[DRIVE, TRAIN, TRANSMISSION, 6, SPEED, V08AB26/GB26/LB26, ALL, OPTIONS, 49VICTRANS08]|
+    |[SUSPENSION, 7043244, S09PR6HSL/PS6HSL/HEL, 49SNOWSHOCKFRONT7043244SB]               |
+    +-------------------------------------------------------------------------------------+
+
+
+Step-2: convert column to array of arrays
+-----
+
+split the array items again using '/', so that all part-id on their own array item
+
+    df2 = df1.withColumn('temp1', expr("transform(temp1, x -> split(x, '/'))"))
+    df2.select('temp1').show(truncate=False)                                                                              
+    +----------------------------------------------------------------------------------------------------------+
+    |temp1                                                                                                     |
+    +----------------------------------------------------------------------------------------------------------+
+    |[[OIL], [PUMP], [ASSEMBLY], [A01EA09CA], [4999202399920239A06]]                                           |
+    |[[OIL], [PUMP], [ASSEMBLY], [A02EA09CA, CB, CC], [4999202399920239A06]]                                   |
+    |[[OIL], [PUMP], [ASSEMBLY], [A01EA05CA], [4999202399920239A06]]                                           |
+    |[[DRIVE], [TRAIN], [TRANSMISSION], [6], [SPEED], [V08AB26, GB26, LB26], [ALL], [OPTIONS], [49VICTRANS08]] |
+    |[[SUSPENSION], [7043244], [S09PR6HSL, PS6HSL, HEL], [49SNOWSHOCKFRONT7043244SB]]                          |
+    +----------------------------------------------------------------------------------------------------------+
+
+
+Step-3: use aggregate to reset part-ids
+-----
+
+The aggregate function will operate on the inner arrays:
+
+
+    df3 = df2.withColumn('temp1', expr("""
+    
+           flatten( 
+             transform(temp1, x -> 
+               transform(sequence(1, size(x)), i ->
+                 aggregate(
+                     sequence(1, i)
+                   , x[0]
+                   , (acc,j) -> concat(substr(acc, 0, length(x[0])-length(x[j-1])), x[j-1])
+                 )
+               )
+             )
+           ) 
+        """))
+    
+    +----------------------------------------------------------------------------------------------+
+    |temp1                                                                                         |
+    +----------------------------------------------------------------------------------------------+
+    |[OIL, PUMP, ASSEMBLY, A01EA09CA, 4999202399920239A06]                                         |
+    |[OIL, PUMP, ASSEMBLY, A02EA09CA, A02EA09CB, A02EA09CC, 4999202399920239A06]                   |
+    |[OIL, PUMP, ASSEMBLY, A01EA05CA, 4999202399920239A06]                                         |
+    |[DRIVE, TRAIN,, TRANSMISSION, 6, SPEED, V08AB26, V08GB26, V08LB26, ALL, OPTIONS, 49VICTRANS08]|
+    |[SUSPENSION, 7043244, S09PR6HSL, S09PS6HSL, S09PS6HEL, 49SNOWSHOCKFRONT7043244SB]             |
+    +----------------------------------------------------------------------------------------------+
+
+**Where:**
+
+* `transform(temp1, x -> func1(x))` : iterate through each item in the array *temp1* to run *func1(x)*, *x* is the inner array (array of strings)
+
+* *func1(x)* mentioned above is another transform which iterates through the `sequence(1, size(x))` and run *func2(i)* on each *i*:
+  
+        transform(sequence(1, size(x)), i -> func2(i))
+      
+
+* *func2(i)* mentioned above is an *aggregate* function, which iterates through the *sequence(1,i)*, with initial 
+    value of *x[0]* and accumulate/reduce using the following function: 
+    
+        (acc,j) -> concat(substr(acc, 1, length(acc)-length(x[j-1])), x[j-1])
+
+    **Note:** `substr()` position is 1-based and `array-indexing` is 0-based, thus we need x[j-1] to refer 
+          to the current array item in the above reduce/aggregate function
+
+* finally, run flatten() to merge the inner arrays
+
+    This step is doing something like the following pysudo-loop:
+
+    for x in temp1:
+      for i in range(1, size(x)+1):
+        acc = x[0]
+        for j in range(1,i+1):
+          acc = concat(substr(acc, 1, length(acc)-length(x[j-1])), x[j-1])
+
+
+Step-4: merge and drop duplicates
+-----
+
+    df4 = df3.groupby('Itemno').agg( 
+          expr("concat_ws(' ', array_distinct(flatten(collect_list(temp1)))) AS Assembly_names")
+        , expr("concat_ws(' ', collect_set(Assembly_id)) as Assembly_ids")
+      )
+
+**Where:**
+
+  * use *collect_list()* to get an array of arrays(temp1 which is array of strings)
+  * use *flatten()* to convert the above into array of strings
+  * use *array_distinct()* to drop duplicates
+  * use *concat_ws()* to convert array of strings into a string
+
+
+        df4.select('Assembly_names').show(truncate=False)                                                                  
+        +---------------------------------------------------------------------------------------+
+        |Assembly_names                                                                         |
+        +---------------------------------------------------------------------------------------+
+        |OIL PUMP ASSEMBLY A01EA09CA 4999202399920239A06 A02EA09CA A02EA09CB A02EA09CC A01EA05CA|
+        |SUSPENSION 7043244 S09PR6HSL S09PS6HSL S09PS6HEL 49SNOWSHOCKFRONT7043244SB             |
+        |DRIVE TRAIN TRANSMISSION 6 SPEED V08AB26 V08GB26 V08LB26 ALL OPTIONS 49VICTRANS08      |
+        +---------------------------------------------------------------------------------------+
+
+
+++++++++++++++++++++++
+++++++++++++++++++++++
+spark.range(1) \
+     .withColumn('t1', expr("""array('SUSPENSION', '7043244', 'S09PR6HSL/PS6HSL/HEL', '49SNOWSHOCKFRONT3244SB')""")) \
+     .selectExpr("transform(t1, x -> split(x, '/') ) as t1") \
+     .selectExpr("""
+
+       flatten( 
+         transform(t1, x -> 
+           transform(sequence(1, size(x)), i ->
+             aggregate(
+                 sequence(1, i)
+               , x[0]
+               , (acc,j) -> concat(substr(acc,0,length(acc)-length(x[j-1])), x[j-1])
+             )
+           )
+         )
+       ) AS t1
+
+     """) \
+     .show(truncate=False) 
