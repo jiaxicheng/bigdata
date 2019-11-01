@@ -1,0 +1,91 @@
+https://stackoverflow.com/questions/58651902/approach-to-cleaning-data-in-spark
+https://stackoverflow.com/questions/58330928/how-split-between-number-pyspark-or-nlp/58332005#58332005
+
+Basic ideas:
+(1) lowercase the string
+(2) regexp_replace consecutive punctuations `\\\p{Punct}+` into a SPACE ` `
+(3) sentences will tokenizes a string of natural language text into words and sentences
+    since we removed all puncuations, there is only one sentence, thus we can use 
+    sentences(..)[0] to convert array of arrays into array of strings
+(4) array_distinct() to remove duplicates
+(5) concat_ws() to convert array into string.
+
+Note: run StopWordsRemover after step-(4) in case it's required.
+
+
+# sample code on docker-container PC
+df = spark.read.csv('/home/xicheng/test/ntlk-1.txt', sep='|', header=True)
+
+    df1 = df.selectExpr(
+        "concat_ws(' | ' , collect_set(cast(fits_assembly_id as int))) as fits_assembly_id"
+      , "concat_ws(' | ' , collect_set(fits_assembly_name)) as fits_assembly_name"
+    ) 
+
+    from pyspark.sql.functions import expr
+
+    # use array_distinct() to remove duplicates
+    # concat_ws() to convert the array into a string
+    # and then drop two temp columns:
+    df_new = df1.withColumn('fits_assembly_name', expr("""
+        concat_ws(
+          ' ',
+          array_distinct(
+            sentences(
+              regexp_replace(
+                lower(fits_assembly_name),
+                "\\\p{Punct}+",
+                " "
+              )
+            )[0]
+          )
+        )
+      """)).show(truncate=False)
+
+
+**Caveats using sentences:** 
+
+Be careful about some special characters:
+
+  + ',' will be kept when connected with numbers, the sequence ends when any non-digit meets
+  for example, sentences treats `0,1,2,3,4` as one word and does not remove the ',' in between
+
+    spark.sql("""select sentences('{"values":[1,2,3,4,5]}')""").show(truncate=False)
+    +-------------------------------------+
+    |sentences({"values":[1,2,3,4,5]}, , )|
+    +-------------------------------------+
+    |[[values, 1,2,3,4,5]]                |
+    +-------------------------------------+
+
+   Notice that items must starts with numbers, the sequence ends when any non-digit meets
+      1,2,12k   <-- 1 item:  [[1,2,12k]]
+      1,2g,12k  <-- 2 items  [[1,2g, 12k]]
+      1,2g,12k  <-- 3 items  [[1, 2g, 12k]]
+
+  + '$', '#' removed
+    spark.sql(r"""select sentences('values 1,2,3,4$5.6  ')""").show(truncate=False)                                    
+    +-----------------------------------+
+    |sentences(values 1,2,3,4$5.6  , , )|
+    +-----------------------------------+
+    |[[values, 1,2,3,4]]                |
+    +-----------------------------------+
+
+  + `&` splitter, sometimes kept
+  spark.sql(r"""select sentences('values 1,2,&3,4&5.6kkk 45')""").show(truncate=False)                               
+  +----------------------------------------+
+  |sentences(values 1,2,&3,4&5.6kkk 45, , )|
+  +----------------------------------------+
+  |[[values, 1,2, 3,4&, 5.6kkk, 45]]       |
+  +----------------------------------------+
+
+
+**Solution:**
+
+using the method provided in this post, convert punctuations into spaces first, this 
+basically make the string in one sentence and thus can be retrieved using `sentences(..)[0]`
+
+    spark.sql("""
+        select sentences(regexp_replace('{"values":[1,2,3,4,5]}', '\\\p{Punct}+', ' '))[0]
+    """).show(truncate=False)
+
+
+
