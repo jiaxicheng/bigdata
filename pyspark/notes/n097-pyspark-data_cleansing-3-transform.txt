@@ -1,0 +1,94 @@
+https://stackoverflow.com/questions/58663008/fix-part-id-and-assembly-column-data-in-spark-2-4-4
+
+This is used to clean data, expected result:
+
+    S09PR6HSL/PS_HSL/H_L  to  S09PR6HSL S09PS6HSL S09PR6HSL
+
+underscores should be replaced by the corresponding character in the first string ('S09PR6HSL' in this example)
+
+How-to: Using multiple transform functions and an array of arrays of arrays:
+
+Step-1: Convert to array of strings
+-----
+use regex pattern `(?:(?![/_])\p{Punct}|\s)+` to split the string into an
+array of strings, filter out the EMPTY array items. save the intermediate column names 
+using *temp1*:
+
+    df1 = df.withColumn('temp1', split('Assembly_name', r'(?:(?![/_])\p{Punct}|\s)+')) \ 
+        .withColumn('temp1', expr("filter(temp1, x -> x <> '')"))
+
+
+Step-2: Convert to array of arrays of arrays
+-----
+futher split the array items with '/', so that each part-id is on its own. then split the array items
+into an array of characters, reverse the array to make it easy for data comparison:
+
+    df2 = df1.withColumn('temp1', expr("transform(temp1, x -> split(x, '/'))")) \
+             .withColumn('temp1', expr("transform(temp1, x -> transform(x, y -> reverse(split(y, ''))) )"))
+
+
+Step-3: reset part-ids using transform
+-----
+for each item of array temp1, we iterate through the `sequence(0, size(x[0])-1)` (which is actually 
+the number of chars to x[0]) using a variable `i`. we check y[i] (the item of the innermost array) 
+if it's NULL or is an underscore, then replace it with the corresponding item from x[0][i]. 
+then we reverse the array and using concat_ws(''..) to convert it back into string.
+
+    df3 = df2.withColumn('temp1', expr("""
+
+        flatten(
+          transform(temp1, x ->
+            transform(x, y ->
+              concat_ws('', 
+                reverse(
+                  transform(sequence(0, size(x[0])-1), i -> IF(y[i] is NULL or y[i] == '_', x[0][i], y[i]))
+                )
+              )
+            )
+          ) 
+        ) 
+
+    """))
+
+
+Note: without considering the underscore issue in OP's post request-2. This question with
+request-1 is much simpler that its original request (solution see below link)
+https://github.com/jiaxicheng/bigdata/blob/master/pyspark/notes/n074-sparksql-higher_order_functions-3_aggregate.txt
+which need aggregate to convert the following:
+
+    From S09PR6HSL/PS6HSL/HEL change to S09PR6HSL S09PS6HSL S09PS6HEL
+
+iThe following will use the 1st string to cover the missing chars to all others after '/', from example:
+
+    From S09PR6HSL/PS6HSL/HEL change to S09PR6HSL S09PS6HSL S09PR6HEL
+
+df_new = spark.sql("""
+
+    with t1 AS (SELECT *, split(fits_assembly_name, '(?:(?!/)\\\p{Punct}|\\\s)+') as temp1 FROM df_table)
+       , t2 AS (SELECT *, transform(temp1, x -> filter(split(x, '/'), y-> y <> '')) as temp2 FROM t1)
+       , t3 AS (SELECT *, flatten(
+             transform(temp2, x ->
+               transform(sequence(0, size(x)-1), i ->
+                 concat(substr(x[0], 1, length(x[0])-length(x[i])), x[i])
+               )
+             )
+           ) AS temp3
+           FROM t2
+         )
+    SELECT concat_ws(' ', array_distinct(flatten(collect_list(temp3)))) AS Assembly_names
+         , concat_ws(' ', collect_set(fits_assembly_id)) AS Assembly_ids
+    FROM t3
+    GROUP BY Itemno
+
+""")
++---------------------------------------------------------------------------------------+
+|Assembly_names                                                                         |
++---------------------------------------------------------------------------------------+
+|OIL PUMP ASSEMBLY A01EA09CA 4999202399920239A06 A02EA09CA A02EA09CB A02EA09CC A01EA05CA|
+|SUSPENSION 7043244 S09PR6HSL S09PS6HSL S09PR6HEL 49SNOWSHOCKFRONT7043244SB             |
+|DRIVE TRAIN CLUTCH PRIMARY S09PR6HSL S SL SH L 49SNOWDRIVECLUTCH09600TRG               |
+|DRIVE TRAIN CLUTCH PRIMARY S09PR6HSL S09PR6HPS HSL HSH L 49SNOWDRIVECLUTCH09600TRG     |
+|DRIVE TRAIN TRANSMISSION 6 SPEED V08AB26 V08GB26 V08LB26 ALL OPTIONS 49VICTRANS08      |
++---------------------------------------------------------------------------------------+
+
+
