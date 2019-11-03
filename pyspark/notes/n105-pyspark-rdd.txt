@@ -230,7 +230,11 @@ Notes:
        
         from heapq import nlargest
         rdd.groupBy(lambda x: x[0]).flatMap(lambda x: nlargest(3, x[1], key=lambda x: x[2]))
-
+  (7) mapPartitions / foreachPartitions could be used to process db connections:
+      However, since mapPartitions are lazily evalulated, if the code contains db.close()
+      it will not work, Python should be fine using `with` which close the DB connection
+      without explicit db.close(). 
+      REF: https://stackoverflow.com/questions/37881042
 
 
 pyspark.Broadcast:
