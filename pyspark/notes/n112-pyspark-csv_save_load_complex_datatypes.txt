@@ -49,6 +49,52 @@ any StructField contain special characters (i.e. SPACE, dot etc), from_json() fu
 In such case, you might need to save df.schema.jsonValue() and use StructType.fromJson to reconstruct 
 the column dtype or manually use backticks to enclose such field names.
 
+Method to overcoe the above Caveat:
+
+Below example to iterate through array/struct and convert IntegerType to DoubleType.
+This can be handled using to_json/from_json. for the schema, write a function to handle
+the Datatype change, either using str.replace() or re.sub().
+
+    Example from https://stackoverflow.com/questions/58697415
+
+    from pyspark.sql.functions import to_json, from_json
+    import re
+
+    dtypes_mapping = df.dtypes
+
+    # simple version
+    # will fail if column name contains substring `integer`
+    # or column names contains special characters like SPACE, dot
+    def convert_dtype(x):
+        return x.replace('integer', 'double')
+    #'struct<rate_1:double,rate_2:double,rate_3:double,card_fee:double,payment_method:string>'
+
+    # better one to use regex sub:
+    # so we enclose the field-name with backticks and
+    # no worry to get messed up if any fieldnames contain the searched substring
+    """
+    regex pattern:
+        field_name: (?<=[<,])(?!(?:array|struct|map)<)([^:]+)
+          + preceded by '<' or ','
+          + not be any of the 'array<', 'struct<', or 'map<' which starts a complex data type
+          + at least one [^:]+ substring
+        field_type:
+          + anything before the next 'comma' or '>'
+    """
+    def convert_dtype(x):
+        mapping = {'integer':'double', 'bigint':'double'}
+        return re.sub(
+              r'(?<=[<,])(?!(?:array|struct|map)<)([^:]+):([^,>]+)'
+            , lambda m: '`{0}`:{1}'.format(m.group(1), mapping.get(m.group(2), m.group(2)))
+            , x
+        )
+    #'struct<`rate_1`:double,`rate_2`:double,`rate_3`:double,`card_fee`:double,`payment_method`:string>'
+
+    df_new = df.select([ 
+        from_json(to_json(d[0]), convert_dtype(d[1])) if d[1].startswith(('struct', 'array')) else d[0]
+            for d in df.dtypes
+    ])
+
 
 Other notes:
 -------
