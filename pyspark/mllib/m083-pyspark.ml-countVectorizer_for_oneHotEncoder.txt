@@ -1,0 +1,104 @@
+
+Target: convert a array of strings containing arbitrary number of elements into OneHotEncoder format.
+
+An interesting way to create a list of OneHotEncoder by using pyspark.ml.feature.CountVectorizer
+
++ need to set binary=True default is False
+
+REF:https://stackoverflow.com/questions/58010126/pyspark-string-array-of-dynamic-length-in-dataframe-column-to-onehot-encoded/58012725#58012725
+
+Data Setup:
+
+    from pyspark.ml.feature import CountVectorizer
+    from pyspark.sql.functions import array_distinct, udf
+    
+    df = spark.createDataFrame([
+            (["ABC","def","ghi"],)
+          , (["Jkl","ABC","def"],)
+          , (["Xyz","ABC"],)
+        ], ['arr']
+    )
+    
+Set up CountVectorizer model and check the model.vocabulary
+   
+    cv = CountVectorizer(inputCol='arr', outputCol='c1', binary=True)
+    
+    model = cv.fit(df)
+    
+    vocabulary = model.vocabulary
+    # [u'ABC', u'def', u'Xyz', u'ghi', u'Jkl']
+
+Create a UDF to convert a vector to array:
+
+    udf_to_array = udf(lambda v: v.toArray().tolist(), 'array<double>')
+    
+
+Transform the df, get the vector column in `c1` its corresponding array column `c2`
+check the `c2` list using the model.vocabulary.
+    
+    df1 = model.transform(df)
+    
+    df1.withColumn('c2', udf_to_array('c1')) \
+       .select('*', *[ F.col('c2')[i].astype('int').alias(vocabulary[i]) for i in range(len(vocabulary))]) \
+       .show()
+    +---------------+--------------------+---+---+---+---+---+
+    |            arr|                  c1|ABC|def|Xyz|ghi|Jkl|
+    +---------------+--------------------+---+---+---+---+---+
+    |[ABC, def, ghi]|(5,[0,1,3],[1.0,1...|  1|  1|  0|  1|  0|
+    |[Jkl, ABC, def]|(5,[0,1,4],[1.0,1...|  1|  1|  0|  0|  1|
+    |     [Xyz, ABC]| (5,[0,2],[1.0,1.0])|  1|  0|  1|  0|  0|
+    +---------------+--------------------+---+---+---+---+---+
+    
+
+#### Another Example with CountVectorizer ####
+https://stackoverflow.com/questions/58011738/pyspark-getting-features-for-clustering-from-list
+
+Use KMeans for clustering:
+
+    df = spark.createDataFrame([
+          ('1', '45') 
+        , ('2', '58') 
+        , ('3', '2') 
+        , ('1', '97') 
+        , ('1', '2') 
+        , ('2', '3') 
+        ], ['user', 'item'])
+
+Note: item should be StringType() to use CountVectorizer
+
+    from pyspark.sql.functions import collect_set
+    from pyspark.ml.feature import CountVectorizer
+    from pyspark.ml.clustering import KMeans
+
+    # collect all unique items for each user
+    df1 = df.groupby('user').agg(collect_set('item').alias('items'))
+
+    # setup cv model
+    cv = CountVectorizer(inputCol='items', outputCol='features')
+    model = cv.fit(df1)
+
+    # create df2 to add features column
+    df2 = model.transform(df1)
+    df2.show(truncate=False)
+    +----+-----------+-------------------------+
+    |user|items      |features                 |
+    +----+-----------+-------------------------+
+    |3   |[2]        |(5,[0],[1.0])            |
+    |1   |[45, 2, 97]|(5,[0,1,2],[1.0,1.0,1.0])|
+    |2   |[3, 58]    |(5,[3,4],[1.0,1.0])      |
+    +----+-----------+-------------------------+
+
+    # setup KMean model
+    kmeans = KMeans(k=2, seed=12)
+
+    model2 = kmeans.fit(df2)
+
+    model2.transform(df2).show(truncate=False)
+    +----+-----------+-------------------------+----------+
+    |user|items      |features                 |prediction|
+    +----+-----------+-------------------------+----------+
+    |3   |[2]        |(5,[0],[1.0])            |1         |
+    |1   |[45, 2, 97]|(5,[0,1,2],[1.0,1.0,1.0])|1         |
+    |2   |[3, 58]    |(5,[3,4],[1.0,1.0])      |0         |
+    +----+-----------+-------------------------+----------+
+
