@@ -1,0 +1,151 @@
+https://stackoverflow.com/questions/58599318/creating-a-new-column-using-complex-conditionals-and-lagged-self-references-in-s
+
+It depends on how `lag` columns show in the if condition. in the current set up, 
+if row.col4 == 99 won't be affected by any other lag function, then it's doable.
+Otherwise, you will have to list examples with more or the most complex `if` 
+conditions containging `lag` function.
+
++ for a function x[n,t] = f(x[n-1,t-1]) 
+  where n is the value-axis, x[n-1,:] is the lag calculation of x[n,:]
+        t is the time-axis or iteration, x[:,t-1] is the previous iteration.
+
+  x[n,t] = f(x[n-1,t-1]), can be verctorized.  use the value from the previous iteration
+  x[n,t] = f(x[n-1,t]), can't be verctorized.  use the values on the same iteration
+
++ however, if the `if` condition is independant on any calculation of it's values 
+  using lag() function. say the `if` is predictable, then it's doable in two runs:
+
+
+    from pyspark.sql.functions import lag, lit, expr, sum 
+    from pyspark.sql import Window
+    
+    df = spark.createDataFrame([
+        ("a", 2, 0),
+        ("b", 3, 1),
+        ("b", 4, 0),
+        ("d", 5, 1),
+        ("e", 6, 0),
+        ("f", 7, 1)
+    ], ["col1", "col2","col3"])
+    
+    # Window Spec to find prev_col4, prev_col5
+    w1 = Window.partitionBy(lit(0)).orderBy('col2')
+    
+    # SQL expression to set up the current condition (without the lag)
+    # create a named_struct for initial col4, col5
+    sql_expr_1 = """
+    
+        CASE 
+          WHEN col1 = 'a' THEN named_struct('col4', CONCAT(col1, col3), 'col5', '11') 
+          WHEN col1 = 'b' THEN 
+              IF(col3 = 1, named_struct('col4', CONCAT(col1, col2), 'col5', '14')
+                         , named_struct('col4', CONCAT(col1, col3), 'col5', '17'))
+          WHEN col1 = 'd' THEN named_struct('col4', '99', 'col5', '19')
+          WHEN prev_col4 = 99 THEN named_struct('col4', prev_col5, 'col5', prev_col5)
+        END
+    
+    """
+    
+    # set EMPTY values for prev_cols and col5
+    # find col4 and col5, prev_col4, prev_col5
+    # set up an sub-group label 'g' used to identify when processing `lag` is required
+    df1 = df.withColumn('prev_col4', lit('')) \
+        .withColumn('prev_col5', lit('')) \
+        .withColumn('temp1', expr(sql_expr_1)) \
+        .select('*', 'temp1.*') \
+        .withColumn('prev_col4', lag('col4').over(w1)) \
+        .withColumn('prev_col5', lag('col5').over(w1)) \
+        .withColumn('g', sum(expr("IF(col1 = 'b' OR prev_col4 = '99', 0, 1)")).over(w1))
+    
+    df1.show()
+    +----+----+----+---------+---------+--------+----+----+---+                     
+    |col1|col2|col3|prev_col4|prev_col5|   temp1|col4|col5|  g|
+    +----+----+----+---------+---------+--------+----+----+---+
+    |   a|   2|   0|     null|     null|[a0, 11]|  a0|  11|  1|
+    |   b|   3|   1|       a0|       11|[b3, 14]|  b3|  14|  1|
+    |   b|   4|   0|       b3|       14|[b0, 17]|  b0|  17|  1|
+    |   d|   5|   1|       b0|       17|[99, 19]|  99|  19|  2|
+    |   e|   6|   0|       99|       19|    null|null|null|  2|
+    |   f|   7|   1|     null|     null|    null|null|null|  3|
+    +----+----+----+---------+---------+--------+----+----+---+
+    
+    sql_expr4 = """
+    
+        CASE
+          WHEN col1 = 'b' THEN concat_ws('', collect_list(col4) OVER (PARTITION BY g ORDER BY col2) )
+          WHEN prev_col4 = '99' THEN concat(prev_col4, prev_col5)
+          ELSE col4
+        END
+    
+    """
+
+    df_new = df1.withColumn('col4', expr(sql_expr4)) \
+                .withColumn('col5', expr("IF(prev_col4 == '99', concat(col1, col2), col5)")) \
+                .select(df1.colRegex(r'`^col\d`'))
+    
+    df_new.sort('col2').show()                                                                                         
+    +----+----+----+------+----+                                                    
+    |col1|col2|col3|  col4|col5|
+    +----+----+----+------+----+
+    |   a|   2|   0|    a0|  11|
+    |   b|   3|   1|  a0b3|  14|
+    |   b|   4|   0|a0b3b0|  17|
+    |   d|   5|   1|    99|  19|
+    |   e|   6|   0|  9919|  e6|
+    |   f|   7|   1|  null|null|
+    +----+----+----+------+----+
+
+
+
+Using UDF:
+---
+    
+    from pyspark.sql.functions import udf, lit, collect_list, struct
+    
+    @udf('array<struct<col1:string,col2:int,col3:int,col4:string,col5:string>>')
+    def gen_col(rows):
+      new_rows = []
+      for row in sorted(rows, key=lambda x: x.col2):
+        if row.col1 == 'a':
+            col4 = row.col1 + str(row.col3)
+            col5 = '11'
+        elif row.col1 == "b":
+            if row.col3 == 1:
+                col4 = col4 + row.col1 + str(row.col2)
+                col5 = '14'
+            if row.col3 == 0:
+                col4 = col4 + row.col1 + str(row.col3)
+                col5 = '17'
+        elif row.col1 == "d":
+            if row.col3 == 1:
+                col4 = '99'
+                col5 = '19'
+        elif col4 == '99':
+            col4 = col4 + col5
+            col5 = row.col1 + str(row.col2)
+        else:
+            col4 = None
+            col5 = None
+        new_rows.append(dict(col4=col4, col5=col5, **row.asDict()))
+      return new_rows
+    
+    
+    df.groupby(lit(1)) \
+      .agg(gen_col(collect_list(struct(df.columns))).alias('new')) \
+      .selectExpr('inline(new)') \
+      .show()
+    +----+----+----+------+----+                                                    
+    |col1|col2|col3|  col4|col5|
+    +----+----+----+------+----+
+    |   a|   2|   0|    a0|  11|
+    |   b|   3|   1|  a0b3|  14|
+    |   b|   4|   0|a0b3b0|  17|
+    |   d|   5|   1|    99|  19|
+    |   e|   6|   0|  9919|  e6|
+    |   f|   7|   1|      |null|
+    +----+----+----+------+----+
+    
+side-note: The above method only applicable when the data can be partitioned properly. i.e.
+using one more more columns to groupby the rows so that related records can be loaded and 
+processed in the same partition.
+
