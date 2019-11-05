@@ -1,0 +1,71 @@
+https://stackoverflow.com/questions/58712615/what-is-the-best-way-to-find-all-occurrences-of-values-from-one-dataframe-in-ano
+
+Questions: A list of texts and a list of lookup words, need to find all words shown in lookup table and
+           saved in an array. both lists contain 100K+ records
+
+Solution: use CountVectorizerModel as 100K lookup words should be manageable for this model (default vocabSize=262144).
+
+    The basic idea is to create the CountVectorizerModel based on a customized list from df2 (lookup table). 
+    split the text in the first df into an array column (or use pyspark.ml.feature.Tokenizer) and then 
+    transform this column into a column of SparseVectors:
+
+
+    from pyspark.ml.feature import CountVectorizerModel
+    from pyspark.sql.functions import split, udf
+
+    lst = [ r.fruit_lookup for r in df_lookup.collect() ] 
+
+    model = CountVectorizerModel.from_vocabulary(lst, inputCol='words_arr', outputCol='fruits_vec')
+
+    df1 = model.transform(df.withColumn('words_arr', split('value', ' ')))
+    df1.show(truncate=False)                                                                                           
+    +------------------------------------+-------------------------------------------+-------------------+
+    |value                               |words_arr                                  |fruits_vec         |
+    +------------------------------------+-------------------------------------------+-------------------+
+    |I like apples                       |[I, like, apples]                          |(4,[0],[1.0])      |
+    |oranges are good                    |[oranges, are, good]                       |(4,[1],[1.0])      |
+    |eating bananas is healthy           |[eating, bananas, is, healthy]             |(4,[2],[1.0])      |
+    |tomatoes are red, bananas are yellow|[tomatoes, are, red,, bananas, are, yellow]|(4,[2,3],[1.0,1.0])|
+    +------------------------------------+-------------------------------------------+-------------------+
+ 
+Method-1: use vocabulary if it can be loaded properly
+---
+
+    to_match = udf(lambda v: [ vocabulary[i] for i in v.indices ], 'array<string>')
+    to_indices = udf(lambda v: list(map(int, v.indices)), 'array<int>')
+
+    df2 = df1.withColumn('fruit_idx', to_indices('fruits_vec')) \
+         .withColumn('extracted_fruits', to_match('fruits_vec')).drop('words_arr', 'fruits_vec')
+    df2.show(truncate=False)                                     
+    +------------------------------------+---------+-------------------+
+    |value                               |fruit_idx|extracted_fruits   |
+    +------------------------------------+---------+-------------------+
+    |I like apples                       |[0]      |[apples]           |
+    |oranges are good                    |[1]      |[oranges]          |
+    |eating bananas is healthy           |[2]      |[bananas]          |
+    |tomatoes are red, bananas are yellow|[2, 3]   |[bananas, tomatoes]|
+    +------------------------------------+---------+-------------------+
+
+
+Method-2: use SparceVector.indices and join
+---
+
+    from pyspark.sql.functions import explode_outer, collect_set
+
+    to_indices = udf(lambda v: list(map(int, v.indices)), 'array<int>')
+
+    df3 = df1.withColumn('fid', explode_outer(to_indices('fruits_vec'))).drop('words_arr', 'fruits_vec')
+
+    df3.join(df_lookup, df31.fid == df_lookup.id, how='left') \
+       .groupby('value') \
+       .agg(collect_set('fruit_lookup').alias('extracted_fruits')) \
+       .show()
+    +--------------------+-------------------+                                      
+    |               value|   extracted_fruits|
+    +--------------------+-------------------+
+    |    oranges are good|          [oranges]|
+    |       I like apples|           [apples]|
+    |tomatoes are red,...|[tomatoes, bananas]|
+    |eating bananas is...|          [bananas]|
+    +--------------------+-------------------+
+
