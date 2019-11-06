@@ -6,27 +6,27 @@ Questions: A list of texts and a list of lookup words, need to find all words sh
 Solution: use CountVectorizerModel as 100K lookup words should be manageable for this model (default vocabSize=262144).
 
     The basic idea is to create the CountVectorizerModel based on a customized list from df2 (lookup table). 
-    split the text in the first df into an array column (or use pyspark.ml.feature.Tokenizer) and then 
+    split the text in the first df into an array column (or use pyspark.ml.feature.RegexTokenizer) and then 
     transform this column into a column of SparseVectors:
 
 
     from pyspark.ml.feature import CountVectorizerModel
-    from pyspark.sql.functions import split, udf
+    from pyspark.sql.functions import split, udf, col, lower
 
     lst = [ r.fruit_lookup for r in df_lookup.collect() ] 
 
     model = CountVectorizerModel.from_vocabulary(lst, inputCol='words_arr', outputCol='fruits_vec')
 
-    df1 = model.transform(df.withColumn('words_arr', split('value', ' ')))
+    df1 = model.transform(df.withColumn('words_arr', split(lower(col('value')), r'[\s\p{Punct}]+')))
     df1.show(truncate=False)                                                                                           
-    +------------------------------------+-------------------------------------------+-------------------+
-    |value                               |words_arr                                  |fruits_vec         |
-    +------------------------------------+-------------------------------------------+-------------------+
-    |I like apples                       |[I, like, apples]                          |(4,[0],[1.0])      |
-    |oranges are good                    |[oranges, are, good]                       |(4,[1],[1.0])      |
-    |eating bananas is healthy           |[eating, bananas, is, healthy]             |(4,[2],[1.0])      |
-    |tomatoes are red, bananas are yellow|[tomatoes, are, red,, bananas, are, yellow]|(4,[2,3],[1.0,1.0])|
-    +------------------------------------+-------------------------------------------+-------------------+
+    +------------------------------------+------------------------------------------+-------------------+
+    |value                               |words_arr                                 |fruits_vec         |
+    +------------------------------------+------------------------------------------+-------------------+
+    |I like apples                       |[I, like, apples]                         |(4,[0],[1.0])      |
+    |oranges are good                    |[oranges, are, good]                      |(4,[1],[1.0])      |
+    |eating bananas is healthy           |[eating, bananas, is, healthy]            |(4,[2],[1.0])      |
+    |tomatoes are red, bananas are yellow|[tomatoes, are, red, bananas, are, yellow]|(4,[2,3],[1.0,1.0])|
+    +------------------------------------+------------------------------------------+-------------------+
  
 Method-1: use vocabulary if it can be loaded properly
 ---
