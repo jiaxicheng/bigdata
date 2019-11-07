@@ -95,6 +95,44 @@ if N=3, (L-1)+(L-2) more items.
 
     df1_processed = df1.withColumn('words_arr', udf_ngram_str(lower(regexp_replace('text', r'[\s\p{Punct}]+', ' '))))
 
+
+    lst = [ r.fruit_lookup for r in df2.collect() ]
+
+    model = CountVectorizerModel.from_vocabulary(lst, inputCol='words_arr', outputCol='fruits_vec')
+
+    df3 = model.transform(df1_processed)
+    df3.show(20,40)
+    +----------------------------------------+----------------------------------------+-------------------+
+    |                                    text|                               words_arr|         fruits_vec|
+    +----------------------------------------+----------------------------------------+-------------------+
+    |                           I like apples|  [i, like, apples, i like, like apples]|      (5,[0],[1.0])|
+    |                        oranges are good|[oranges, are, good, oranges are, are...|      (5,[1],[1.0])|
+    |               eating bananas is healthy|[eating, bananas, is, healthy, eating...|      (5,[2],[1.0])|
+    |    tomatoes are red, bananas are yellow|[tomatoes, are, red, bananas, are, ye...|(5,[2,3],[1.0,1.0])|
+    |                                    test|                                  [test]|          (5,[],[])|
+    |I have dragon fruit and apples in my bag|[i, have, dragon, fruit, and, apples,...|(5,[0,4],[1.0,1.0])|
+    +----------------------------------------+----------------------------------------+-------------------+
+
+Alternative Method: left join with rlike as the condition:
+
+    from pyspark.sql.functions import expr, collect_set
     
+    df1.alias('d1').join(
+          df2.alias('d2')
+        , expr('d1.text rlike concat("\\\\b", d2.fruit_lookup, "\\\\b")')
+        , 'left'
+    ).groupby('text') \
+     .agg(collect_set('fruit_lookup').alias('extracted_fruits')) \
+     .show()
+    +----------------------------------------+----------------------+
+    |text                                    |extracted_fruits      |
+    +----------------------------------------+----------------------+
+    |oranges are good                        |[oranges]             |
+    |I like apples                           |[apples]              |
+    |I have dragon fruit and apples in my bag|[dragon fruit, apples]|
+    |tomatoes are red, bananas are yellow    |[tomatoes, bananas]   |
+    |eating bananas is healthy               |[bananas]             |
+    |test                                    |[]                    |
+    +----------------------------------------+----------------------+
 
-
+Where: "\\\\b is word boundary so that the lookup values do not mess up with their contexts.
