@@ -69,3 +69,32 @@ Method-2: use SparceVector.indices and join
     |eating bananas is...|          [bananas]|
     +--------------------+-------------------+
 
+Extended for preprocessing on lookup values with multiple words:
+---
+Added the following df1 pre-process step and create an array column including all 
+N-gram combinations. For each string with L words, N=2 will add (L-1) more items in array, 
+if N=3, (L-1)+(L-2) more items.
+
+    from pyspark.sql.functions import split, udf, regexp_replace, lower
+
+    # max number of words in a single entry of the lookup table df2
+    N = 2
+
+    # Pre-process the `text` field up to N-grams, 
+    # example: ngram_str('oranges are good', 3) 
+    #      --> ['oranges', 'are', 'good', 'oranges are', 'are good', 'oranges are good']
+    def ngram_str(s_t_r, N):
+      arr = s_t_r.split()           
+      L = len(arr)           
+      for i in range(2,N+1):           
+        if L - i < 0: break           
+        arr += [ ' '.join(arr[j:j+i]) for j in range(L-i+1) ]           
+      return arr           
+
+    udf_ngram_str = udf(lambda x: ngram_str(x, N), 'array<string>')
+
+    df1_processed = df1.withColumn('words_arr', udf_ngram_str(lower(regexp_replace('text', r'[\s\p{Punct}]+', ' '))))
+
+    
+
+
