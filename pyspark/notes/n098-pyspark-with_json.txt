@@ -82,6 +82,28 @@ Working with JSON data and PySpark:
   + pyspark.sql.functions.to_json(col, options={})
     + convert a column containing StructType, ArrayType or MapType into JSON string
 
+  Notes:
+   (1) get_json_object and json_tuple require `col` having VALID JSON string, invalid JSON like
+       single-quoted fields/values will get failed with these functions
+       from_json is more robust and can take single-quotes by default and the options argument 
+       make it flexible and support all options the same as spark.read.json()
+   (2) json_tuple, get_json_object and from_json can all check fields which do not exist in the
+       JSON string and will return NULL. For example, a JSON dictionary, if you have a list of 
+       all fields(example: https://stackoverflow.com/questions/58769232)
+
+       * json_tuple:
+
+             df.select(json_tuple('json_col', *fields_list).alias(*fields_list))
+
+       * get_json_object:
+
+             df.select([ get_json_object('json_col', f'$.{p}').alias(p) for p in fields_list]) 
+
+       * from_json:
+
+             schema = 'struct<{}>'.format(','.join([ f'{x}:string' for x in fields_list ]))
+             df.withColumn('data', from_json('json_col', schema)).select('data.*')
+
 
 
 + pyspark.sql.types
