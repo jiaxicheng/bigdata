@@ -3,7 +3,7 @@ About PySpark Partitions:
 
 Types of partitions:
 ---
-  + Hash partitioning
+  + Hash partitioning (default)
     most of time, Hash partitioning is good enough. with numPartition only supplied, rows will be
     evenly distributed. However, using specific cols/keys as partitioner, there could be significant
     skewness in data distributions
@@ -25,6 +25,12 @@ Things to consideration when partitioning:
   + reading large unsplitable files, use repartition to post-split data
   + #partitions should be proportional to #executors (the size of partition is limited by 
     the available RAM of each executor)
+  + repartitioning is expensive. in a typical scenario, most of the data has to be serialized,
+    shuffled and deserialized and few operations can benefit from pre-partition data:
+    + groupby, window functions do not gain anything from pre-partitions.
+    REF: https://stackoverflow.com/questions/30995699/how-to-define-partitioning-of-dataframe
+    **Note:** after groupby, the number of partitions will be set to the system default, not the 
+      N from df.repartition(N).groupby()
 
 
 pyspark.RDD:
@@ -97,6 +103,9 @@ pyspark.RDD:
            spark.range(0,100).withColumn('id', expr("IF(id<90,1,id)")).repartition(5,'id').rdd.glom().map(len).collect()
            [1, 3, 3, 1, 92]
 
+           # find Top-10 count of rows in partitions
+           df.repartition(N,'LNAME','Address').rdd.glom().map(len).takeOrdered(10, key=lambda x: -x)
+
 
 pyspark.sql.DataFrame:
 ---
@@ -116,6 +125,19 @@ pyspark.sql.DataFrame:
        REF: https://www.waitingforcode.com/apache-spark-sql/range-partitioning-apache-spark-sql/read
    (2) repartition()/repartitionByRange() is very useful when working with mapPartitions() or
        mapPartitionsWithIndex() or foreachPartition(f)
+   (3) using the following method to set up the partitions at run-time:
+
+         spark.conf.set('spark.sql.shuffle.partitions', 500)
+
+   (4) If you want to use mapPartitions() to grab the same partitions in one chuck, and then sent to
+       driver as toLocalIterator(), you will need to wrap up the data with list as [list_of_dicts] 
+       so that the whole chunk is treated as a single item.
+       Example: https://stackoverflow.com/questions/58757225
+
+         chunks = (spark_df.repartition(N).rdd
+             .mapPartitions(lambda iterator: [[x.asDict() for x in iterator]])
+             .toLocalIterator()
+         )
 
 
 
