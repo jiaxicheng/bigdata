@@ -66,6 +66,7 @@ pyspark.sql.Catalog:
     isCached()
     uncacheTable(tbl_name)
     clearCache()
+    + remove all cached tables from the in-memory cache. 
   + refreshByPath(path)
     refreshTable(tbl_name)
   + recoverPartitions(tbl_name)
@@ -188,8 +189,10 @@ spark.sql.DataFrame:
     distinct()
     greoupBy(*col), groupby(*col)
     limit(N)
-  + orderBy(*col)
-    sort(*col)
+  + orderBy(*col, ascending=True)   <-- alias of `sort`
+      df.orderBy(['col1', 'col2'], ascending=[False,True])
+      df.orderBy('col1', 'col2', ascending=[0,1])
+    sort(*col) <-- same as above 
     sortWithinPartitions
   + foreach(f)
     foreachPartition(f)
@@ -255,6 +258,9 @@ spark.sql.DataFrame:
 
            df.count() - df.fillna('').replace('STR', None).summary('count').toPandas().T.iloc[1:,0].astype(int)
        
+       + df.replace(), df.fillna(), the replacement part can be a bool, int, long, float, string or None. complex
+         data types (array, map, struct) are not supported.
+       + df.fillna(0) changes only numeric columns, df.fillna('nn') only changes string columns
    (3) create an empty RDD and empty DataFrame
 
           rdd_empty = spark.sparkContext.emptyRDD()
@@ -287,7 +293,26 @@ spark.sql.DataFrame:
 
        check also: sc.setCheckpointDir(), persist(StorageLevel.DISK_ONLY)
        REF: https://stackoverflow.com/questions/35127720
+   (10) unpersist, releasing resources etc:
 
+        1. delete the object and then gc.collect()
+
+           import gc
+           del mydf
+           gc.collect()
+
+         2. unpersist
+
+           mydf.unpersist()    <-- mark for removal
+
+         3. Java gc: REF: https://stackoverflow.com/questions/58759929
+
+           sc._gateway.detach(my_model._java_object)
+          
+         4. use spark.catalog to unpersist all dataframe
+
+           spark.catalog.clearCache()
+           spark.catalog.uncacheTable('df_table')
 
        
 
@@ -449,7 +474,7 @@ spark.read
      + [a-b]: char range
      + {a,b}: alternation
      + \c: escape char
-  (6) most path for DataFrameReader take list of strings for input path(s) or RDD 
+  (6) most path for DataFrameReader take list of strings for input path(s) or RDD; 
       for RDD (textFile, wholeTextFile) takes only one String as path (not list)
       but you can use shell glob to add more than one files, example:
 
