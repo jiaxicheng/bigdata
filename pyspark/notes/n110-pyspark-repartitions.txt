@@ -129,6 +129,11 @@ pyspark.sql.DataFrame:
 
          spark.conf.set('spark.sql.shuffle.partitions', 500)
 
+       + spark.sql.shuffle.partitions configures the number of partitions that are used when
+         shuffling data for joins or aggregations
+       + spark.default.parallelism is the default number of partitions in RDDs returned by
+         transformations like join, reduceByKey and parallelize when not set explicitly by users
+
    (4) If you want to use mapPartitions() to grab the same partitions in one chuck, and then sent to
        driver as toLocalIterator(), you will need to wrap up the data with list as [list_of_dicts] 
        so that the whole chunk is treated as a single item.
