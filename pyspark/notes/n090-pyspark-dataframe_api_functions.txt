@@ -1,0 +1,64 @@
+Some notes on Dataframe buitin API functions:
+
+---
+  + lit(): can NOT used on list, dict
+
+  + split(col, ptn):  split by ' ' or '\s+' will not automatically remove leading/trailing whitespaces
+    Example:
+            spark.sql('select " A B\t  C  " as new').select(split('new', '\s+')).show()
+            +---------------+
+            |split(new, \s+)|
+            +---------------+
+            |  [, A, B, C, ]|
+            +---------------+
+
+  + NULL check:
+    (1) check if all columns are NULL: https://stackoverflow.com/questions/58730001
+
+        IF(coalesce(product, quantity, from, to) is NULL
+          , NULL
+          , struct(product, quantity, from, to)
+        )
+
+     (2) Any field is NULL:
+
+        IF(concat(product, quantity, from, to) is NULL
+          , NULL
+          , struct(product, quantity, from, to)
+        )
+
+  + udf function
+    (1) testing of the following code shows that StructType() item in an ArrayType is a list 
+        of <class 'pyspark.sql.types.Row'> in a udf function. Thus, you will need to use asDict()
+        to convert the StructType items into a dict.
+
+        @udf('')
+        def test_struct(arr): return '{}'.format(type(arr[0]))
+        spark.range(1).select(test_struct(expr("array(named_struct('a',2,'b',3))")).alias('dt')).show(truncate=False)
+        +-------------------------------+
+        |dt                             |
+        +-------------------------------+
+        |<class 'pyspark.sql.types.Row'>|
+        +-------------------------------+
+
+        `arr` is a list in udf, the item of array of structs is `pyspark.sql.types.Row`.
+
+  + functions that do not take column name as arguments
+    lower()    --> `lower('col_name')` not working, must be `lower(col('col_name'))`
+    when() 
+
+  + window(timeColumn, windowDuration, slideDuration=None, startTime=None)
+    bucketize rows into one or more time windows. the window range is: [start, end)
+    return a struct call window by default with fields: `start` and `end` (both are TimestampType)
+    + timeColumn: must be pyspark.sql.types.TimestampType
+    + windowDuration: valid interval strings: week, day, hour, minute, second, microsecond
+         example: '1 second', '5 day 12 hours', '10 minutes'
+    + slideDuration: make it a moving window, slideDuration is the interval of the current 
+         to the next Window start. if unset, the Window will be continuous Window slide.
+    + startTime: is also an interval, can be negative. is the offset with respect to 1970-01-01 00:00:00 UTC
+         with which to start window intervals.
+         + startTime must be less than windowDuration and greater than -windowDuration (-windowDuration, windowDuration)
+
+
+
+
