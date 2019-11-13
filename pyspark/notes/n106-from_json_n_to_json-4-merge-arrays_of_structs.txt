@@ -1,0 +1,79 @@
+https://stackoverflow.com/questions/58065300/pyspark-udf-function-on-multiple-columns-of-lists
+
+Merge multiple columns of similar datatypes(array of structs) but non-identical fields.
+direct concat does not work due to the data type mismatch.
+
+Example: 
+
+    from pyspark.sql.functions import concat, sort_array, from_json, to_json
+
+    df = spark.read.json('file:///home/hdfs/test/pyspark/json-10.txt', multiLine=True)
+
+    df.printSchema()
+    root
+     |-- click_info: array (nullable = true)
+     |    |-- element: struct (containsNull = true)
+     |    |    |-- action: string (nullable = true)
+     |    |    |-- cat: string (nullable = true)
+     |    |    |-- date: string (nullable = true)
+     |    |    |-- query: string (nullable = true)
+     |    |    |-- text: string (nullable = true)
+     |    |    |-- time: string (nullable = true)
+     |-- id: long (nullable = true)
+     |-- load_info: array (nullable = true)
+     |    |-- element: struct (containsNull = true)
+     |    |    |-- action: string (nullable = true)
+     |    |    |-- cat: string (nullable = true)
+     |    |    |-- date: string (nullable = true)
+     |    |    |-- query: string (nullable = true)
+     |    |    |-- time: string (nullable = true)
+     |-- type_info: array (nullable = true)
+     |    |-- element: struct (containsNull = true)
+     |    |    |-- action: string (nullable = true)
+     |    |    |-- date: string (nullable = true)
+     |    |    |-- text: string (nullable = true)
+     |    |    |-- time: string (nullable = true)
+    
+    
+    # column names to merge
+    cols = [ c for c in df.columns if c.endswith('_info') ]
+    # ['click_info', 'load_info', 'type_info']
+    
+    # all fields in the final merged column, sorting will based on these fields in order
+    fields = ['time', 'date', 'action', 'query', 'cat', 'text']
+    
+    # new_dtype should contain all fields of the above lst in struct fields
+    schema = 'array<struct<{}>>'.format(','.join('{}:string'.format(f) for f in fields))
+    #'array<struct<time:string,date:string,action:string,query:string,cat:string,text:string>>'
+
+
+Method-1: Use from_json/to_json:
+
+    df.withColumn('info', sort_array(concat(*[from_json(to_json(c),schema) for c in cols]))) \
+      .select('id', 'info')
+      .printSchema()
+    root
+     |-- id: long (nullable = true)
+     |-- info: array (nullable = true)
+     |    |-- element: struct (containsNull = true)
+     |    |    |-- time: string (nullable = true)
+     |    |    |-- date: string (nullable = true)
+     |    |    |-- action: string (nullable = true)
+     |    |    |-- query: string (nullable = true)
+     |    |    |-- cat: string (nullable = true)
+     |    |    |-- text: string (nullable = true)
+
+
+Method-2: Use UDF:
+
+    # iterate through the struct elements to add missing fields with value of None
+    def normalize_struct(arr, lst):
+        return [ { k:e.asDict().get(k, None) for k in lst } for e in arr ]
+
+    # set up the UDF
+    udf_normalize_struct = udf(lambda x: normalize_struct(x, fields), schema)
+
+
+    df_new = df.select('id', sort_array(concat(*[ udf_normalize_struct(c) for c in cols ]).alias('info')))
+    
+    
