@@ -1,0 +1,152 @@
+https://stackoverflow.com/questions/58824286/accessing-keyof-object-from-nested-array-of-object-json-with-pyspark
+
++ Use get_json_object and JSONPath to flatten the data structure
+  Notice: the JSONPath fieldname must be enclosed by single-quote -->  `$[*].data['lesson1'].schedule`
+
++ Use from_json/to_json to convert JSON strings to/from pyspark data structures
+
+    df = spark.read.json('/home/xicheng/test/json-9.txt', multiLine=True)
+  
+    root
+     |-- class: array (nullable = true)
+     |    |-- element: struct (containsNull = true)
+     |    |    |-- class_id: string (nullable = true)
+     |    |    |-- data: struct (nullable = true)
+     |    |    |    |-- lesson1: struct (nullable = true)
+     |    |    |    |    |-- id: long (nullable = true)
+     |    |    |    |    |-- schedule: array (nullable = true)
+     |    |    |    |    |    |-- element: struct (containsNull = true)
+     |    |    |    |    |    |    |-- lesson_price: string (nullable = true)
+     |    |    |    |    |    |    |-- schedule_date: string (nullable = true)
+     |    |    |    |    |    |    |-- schedule_id: string (nullable = true)
+     |    |    |    |    |    |    |-- status: string (nullable = true)
+     |    |    |    |-- lesson2: struct (nullable = true)
+     |    |    |    |    |-- id: long (nullable = true)
+     |    |    |    |    |-- schedule: array (nullable = true)
+     |    |    |    |    |    |-- element: struct (containsNull = true)
+     |    |    |    |    |    |    |-- lesson_price: string (nullable = true)
+     |    |    |    |    |    |    |-- schedule_date: string (nullable = true)
+     |    |    |    |    |    |    |-- schedule_id: string (nullable = true)
+     |    |    |    |    |    |    |-- status: string (nullable = true)
+     |    |    |    |-- lesson3: struct (nullable = true)
+     |    |    |    |    |-- id: long (nullable = true)
+     |    |    |    |    |-- schedule: array (nullable = true)
+     |    |    |    |    |    |-- element: struct (containsNull = true)
+     |    |    |    |    |    |    |-- lesson_price: string (nullable = true)
+     |    |    |    |    |    |    |-- schedule_date: string (nullable = true)
+     |    |    |    |    |    |    |-- schedule_id: string (nullable = true)
+     |    |    |    |    |    |    |-- status: string (nullable = true)
+     |    |    |    |-- lesson4: struct (nullable = true)
+     |    |    |    |    |-- id: long (nullable = true)
+     |    |    |    |    |-- schedule: array (nullable = true)
+     |    |    |    |    |    |-- element: struct (containsNull = true)
+     |    |    |    |    |    |    |-- lesson_price: string (nullable = true)
+     |    |    |    |    |    |    |-- schedule_date: string (nullable = true)
+     |    |    |    |    |    |    |-- schedule_id: string (nullable = true)
+     |    |    |    |    |    |    |-- status: string (nullable = true)
+
+
+Flatten the data structure
+---
+use JSON and related functions to flatten the complex data structure to the level of lessons' schedule:
+
+    from pyspark.sql.functions import from_json, regexp_replace, concat, coalesce, get_json_object, to_json, lit, expr
+    
+    # retrieve all lessons:
+    lessons = ['lesson1', 'lesson2', 'lesson3', 'lesson4', 'lesson5']
+    # can also be retrieved through df.schema
+    """
+    lessons = [ 
+        [ f1['name'] for f1 in f['type']['fields'] ] 
+            for f in df.schema.jsonValue()['fields'][0]['type']['elementType']['fields'] 
+              if f['name'] == 'data' 
+    ][0]
+    """
+
+    # schema for lessons' schedule
+    schema = 'array<struct<lesson_price:string,schedule_date:string,schedule_id:string,status:string>>'
+
+    df1 = df.select( 
+         from_json( 
+           regexp_replace( 
+               concat(*[ 
+                 coalesce( 
+                     get_json_object(to_json('class'), "$[*].data['{}'].schedule".format(L)) 
+                   , lit('') 
+                 ) for L in lessons] 
+               ) 
+             , r'\]\[' 
+             , ',' 
+           ) 
+         , schema 
+       ).alias('all_schedules') 
+     ).selectExpr('inline(all_schedules)')
+    
+    df1.show()                                                       
+    #+------------+-------------+-----------+-----------------+
+    #|lesson_price|schedule_date|schedule_id|           status|
+    #+------------+-------------+-----------+-----------------+
+    #|      USD 50|   2017-05-21|          1|        CANCELLED|
+    #|       USD10|   2017-06-04|          1|         FINISHED|
+    #|       USD12|   2018-03-01|          5|           CLOSED|
+    #|      USD 25|   2017-07-11|          1|          ONGOING|
+    #|      USD 15|   2016-09-24|          2|OPEN REGISTRATION|
+    #|      USD 19|   2016-12-17|          1|          ONGOING|
+    #|      USD 29|   2015-11-12|          2|          ONGOING|
+    #|      USD 14|   2015-11-10|          3|      ON SCHEDULE|
+    #+------------+-------------+-----------+-----------------+
+
+**Where:**
+
+* we use *to_json()* function to convert *df.class* into an JSON string
+* for each lesson *L*, we retrieve all its schedules by using *get_json_object()* function 
+  and the JSONPath `$[*].data['L'].schedule`, this results in an JSON string of *array_of_structs*
+* use *concat()* to concatenate the results from the above function for all lessons (convert 
+  NULL to EMPTY string using coalesce function)
+* use *regexp_replace()* to replace all `][` with `,` so that the above concatenated string 
+  become a single valid JSON string of `array of structs`
+* use *from_json()* and the pre-defined schema to convert the above JSON *array_of_structs* 
+  into pyspark *array_of_structs*
+* use SparkSQL `inline()` function to convert the above into a dataframe `df1`
+
+
+Do the aggregations:
+---
+With df1 the flattened dataframe, we can retrieve numbers from the lesson_price field, and cast the data type of the related columns and then do the aggregations:
+
+    df2 = df1.selectExpr(
+        'float(substr(lesson_price, 4)) AS lesson_price'
+      , 'date(schedule_date) AS schedule_date'
+      , 'schedule_id'
+      , 'status'
+    ).agg(
+        expr('sum(IF(status="ONGOING" AND schedule_date < "2017-01-01",1,0)) AS ongoing_before_2017')
+      , expr('avg(IF(schedule_date < "2017-01-01", lesson_price, NULL)) AS avg_lesson_price_before_2017')
+    )
+    df2.show()
+    #+-------------------+----------------------------+
+    #|ongoing_before_2017|avg_lesson_price_before_2017|
+    #+-------------------+----------------------------+
+    #|                  2|                       19.25|
+    #+-------------------+----------------------------+
+
+
+**Caveat:** the method to flatten data could be slow due to many String parsing operations.
+
+
+
+Alternative to flatten the data
+---
+another method with less String parsing is first to flatten the data to the `lessons` level and then 
+use *from_json*/*to_json* and a *reduce* function to flatten the data down to the *schedule* level:
+
+    from pyspark.sql.functions import from_json, to_json, col
+    from functools import reduce
+
+    df0 = df.selectExpr('inline(class)') \
+        .selectExpr('data.*') \
+        .select(*[from_json(to_json(col(L)['schedule']), schema).alias(L) for L in lessons])
+
+    df1 = reduce(lambda d1, d2: d1.union(d2), [ df0.selectExpr('inline(`{}`)'.format(L)) for L in lessons ])
+
+
