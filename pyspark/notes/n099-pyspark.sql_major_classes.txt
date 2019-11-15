@@ -138,6 +138,15 @@ pyspark.sql.Column:
    (2) col.astype('double'), will trim the leading/trailing whitespces before type casting
        however `1$2`, `$23.5` containing `[^-+.0-9]` will be casted to null
        notice that `[+-]` must be the first char if exists and `.`(dot) can have only one.
+   (3) dot `.` in the column name must be enclosed with backticks when selecting column
+       , no need for alias, for example:
+
+         c = 'SDV.1'
+         df.select(F.col('`{}`'.format(c)).alias(c))    -->  F.col(c)
+         df.withColumn(c, df['`{}`'.format(c)])         -->  df[c]
+
+         This fixed the following ERROR:
+             pyspark.sql.utils.AnalysisException: "Can't extract value from SDV#27: need struct type but got string;"
 
 
 
@@ -205,9 +214,12 @@ spark.sql.DataFrame:
   + replace(to_replace, value=<>, subset=None): 
     * Note: value and to_replace must have the same type, only available to numerics, booleans or strings
             to_replace and value can be list, to_replace can be a dict when value is missing.
-  + describe(): compute basic stat for numeric and string columns
-    summary()
-    agg(*expr)
+  + describe(): 
+      compute basic stat for numeric and string columns
+    summary(): 
+      similar to the above, but can take specific status, i.e. df.summary('count')
+    agg(*expr): 
+      shorthand for df.groupby().agg()
     approxQuantile(col, probablities, relativeError)
     count()
     cov(col1, col2)
@@ -327,6 +339,12 @@ pyspark.sql.GroupedData
     mean(*col)
     sum(*col)
   + pivot(pivot_col, values=None)
+ Notes:
+  (1) agg() function can take a dict, weakness is one column can has only one aggregate function
+      and you can not directly set up alias:
+
+        df.groupby(grped_cols).agg({'col1': 'max', 'col2': 'min'})
+        # column-name will be `col1(max)` and `col2(min)`
 
 
 
