@@ -1,0 +1,85 @@
+https://stackoverflow.com/questions/58633915/calculating-the-cosine-similarity-between-to-different-datasets-in-pyspark
+
+One way is to use the pyspark.ml.linalg.Vector's dot and norm methods to calculate the cosine_similarity.
+use VectorAssembler to create Vectors required for the calculation:
+
+    import pandas as pd
+    import numpy as np
+
+    from pyspark.ml.feature import VectorAssembler
+    from pyspark.sql.functions import udf
+
+    @udf('double')
+    def cosine_similarity(v1, v2):
+        return float(v1.dot(v2)/v1.norm(2)/v2.norm(2))
+
+    df1 = pd.DataFrame(np.random.randint(1,10,(10,5)))
+    df2 = pd.DataFrame(np.random.randint(1,10,(3,5)))
+
+    sdf1 = spark.createDataFrame(df1)
+    sdf2 = spark.createDataFrame(df2)
+
+    cols = sdf1.columns
+
+    assembler = VectorAssembler(inputCols=cols, outputCol='f1')
+
+    sdf1a = assembler.transform(sdf1).select(monotonically_increasing_id().alias('id1'),'f1')
+    +---+--------------------+
+    |id1|                  f1|
+    +---+--------------------+
+    |  0|[9.0,2.0,2.0,4.0,...|
+    |  1|[5.0,2.0,8.0,4.0,...|
+    |  2|[1.0,3.0,4.0,7.0,...|
+    |  3|[6.0,4.0,9.0,2.0,...|
+    |  4|[5.0,6.0,7.0,3.0,...|
+    |  5|[4.0,3.0,1.0,9.0,...|
+    |  6|[3.0,3.0,5.0,4.0,...|
+    |  7|[5.0,1.0,1.0,8.0,...|
+    |  8|[9.0,1.0,2.0,6.0,...|
+    |  9|[3.0,3.0,7.0,5.0,...|
+    +---+--------------------+
+
+    sdf2a = assembler.transform(sdf2.toDF(*cols)).select(monotonically_increasing_id().alias('id2'),'f1')
+
+    sdf3 = sdf1a.crossJoin(sdf2a) \
+        .select('id1', 'id2', cosine_similarity(sdf1a.f1, sdf2a.f1).alias('cosine_similarity'))
+
+    sdf3.show(7)
+    +---+---+------------------+
+    |id1|id2| cosine_similarity|
+    +---+---+------------------+
+    |  0|  0|0.8226473666806359|
+    |  0|  1|0.8138801294887597|
+    |  0|  2|0.8549254304692556|
+    |  1|  0| 0.735164969559576|
+    |  1|  1|0.6662098891778447|
+    |  1|  2|0.8394409788810606|
+    |  2|  0|0.7209870199803722|
+    +---+---+------------------+
+    only showing top 7 rows
+
+    sdf3a = sdf3.groupby('id1').pivot('id2') \
+                 .agg(first('cosine_similarity').alias('cosine_similarity'))
+
+    sdf3a.show()
+    +---+------------------+------------------+------------------+
+    |id1|                 0|                 1|                 2|
+    +---+------------------+------------------+------------------+
+    |  0|0.8226473666806359|0.8138801294887597|0.8549254304692556|
+    |  7|0.7141092385043216|0.7765549061944836| 0.723805966578586|
+    |  6|0.8137764292889191|0.7089157442634771|0.8578304866670369|
+    |  9|  0.78066140831492|0.6824934655535962|0.8440610618168806|
+    |  5|0.8387271329003273|0.8216426187247178|0.8234742066506151|
+    |  1| 0.735164969559576|0.6662098891778447|0.8394409788810606|
+    |  3|0.6928216813695969|  0.64814452416179|0.8043963819821851|
+    |  8|0.7957159904838934|0.7890455076752226|0.8262847189068705|
+    |  2|0.7209870199803722|0.7499699585427768|0.7594911989303882|
+    |  4| 0.882822398061039|0.7917546385701353|0.9373450285136945|
+    +---+------------------+------------------+------------------+
+
+
+
+
+
+
+
