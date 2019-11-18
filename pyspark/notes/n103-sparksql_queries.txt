@@ -119,6 +119,26 @@ SELECT [hints, ...] [ALL|DISTINCT] named_expression[, named_expression, ...]
     + ROWS Between Unbounded Preceding AND Unbounded Following
     + RANGE BETWEEN -123455 AND 0
 
+  + example: https://stackoverflow.com/questions/58920120
+
+       SELECT itemNo 
+       ,      modelnumber 
+       ,      itemClass 
+       ,      concat_ws('-', sort_array(collect_set(purchaseYear) OVER w1)) AS purchase_years 
+       ,      concat_ws('-', sequence(purchaseYear, purchaseYear+2)) AS all_purchase_years
+       ,      sum(PurchaseRatio) OVER w1 AS sum_PurchaseRatio 
+       ,      sum(ModelRatio) OVER w1 AS sum_ModelRatio 
+       FROM test 
+       ORDER BY itemNo, purchaseYear 
+       WINDOW w1 AS (
+           PARTITION BY (itemNo, modelnumber, itemClass)  
+           ORDER BY purchaseYear 
+           RANGE BETWEEN CURRENT ROW AND 2 FOLLOWING
+       ) 
+  Notes:
+   (1) Window Spec `w1` must be applied to an aggregate function, see example: `collect_set(purchaseYear) OVER w1`
+       
+
 
 + Hints: 
 ---
