@@ -1,0 +1,132 @@
+Datafram normalize and denoemalize:
+---
+
+df = spark.createDataFrame([('a',1), ('b',1), ('a',2), ('a',2), ('c',10)], ["id","score"])
+
+df.show()
++---+-----+
+| id|score|
++---+-----+
+|  a|    1|
+|  b|    1|
+|  a|    2|
+|  a|    2|
+|  c|   10|
++---+-----+
+
++ df.crosstab(col1, col2):   frequency table
+  Task: finds unique values from col1 and col2 and then get the #of records in each combo
+      + col1: unqiue values on rows 
+      + col2: unique values on columns
+
+    # df.crosstab() return another dataframe
+    df.crosstab('score', 'id').show()
+    +--------+---+---+---+                                                          
+    |score_id|  a|  b|  c|
+    +--------+---+---+---+
+    |       2|  2|  0|  0|
+    |       1|  1|  1|  0|
+    |      10|  0|  0|  1|
+    +--------+---+---+---+
+
+
++ df.cube(*cols):
+  Task: return GroupedData object
+
+    # df.cube(*col) return GroupedData object:
+    df.cube('id').sum('score').orderBy(F.asc_nulls_last('id')).show()
+    +----+----------+                                                               
+    |  id|sum(score)|
+    +----+----------+
+    |   a|         5|
+    |   b|         1|
+    |   c|        10|
+    |null|        16|
+    +----+----------+
+    cube is more used with 
+
+    # ref: https://stackoverflow.com/questions/58882259
+    from pyspark.sql.functions import grouping, sum as fsum
+    
+    cols = df_pivot.columns[1:]
+
+    df1 = df_pivot.cube('country').agg(*[ fsum(c).alias(c) for c in cols ]) \
+        .orderBy(grouping('country')) \
+        .fillna('Total', subset=['country']) 
+
+    df1.show()
+    +-------+-------+-------+-------+-------+-------+                               
+    |country|2015-10|2015-11|2015-12|2018-10|2019-08|
+    +-------+-------+-------+-------+-------+-------+
+    |Germany|   null|    580|   null|    580|   null|
+    |  Japan|   null|   null|    502|   null|    230|
+    | Canada|   null|   null|   null|   null|    200|
+    |   U.S.|    500|   null|    500|    520|   null|
+    |  Total|    500|    580|   1002|   1100|    430|
+    +-------+-------+-------+-------+-------+-------+
+
+        GROUP BY c1, c2 WITH ROLLUP
+    is the same as:
+        GROUP BY c1, c2 GROUPING SETS ((a,b), (a), ())
+
+        GROUP BY c1, c2 WITH CUBE
+    is the same as:
+        GROUP BY c1, c2 GROUPING SETS ((a,b), (a), (b), ())
+
+
++ df.groupby().pivot()
+  Task: used after groupby(), from long to wide (denormalize)
+
+    df.groupby(F.lit('t')).pivot('id').sum('score').drop('t').show()
+    +---+---+---+                                                                   
+    |  a|  b|  c|
+    +---+---+---+
+    |  5|  1| 10|
+    +---+---+---+
+
+
++ from wide-to-long / melt 
+  + use select + union:
+    select label, feature1 from df
+    UNION
+    select label, feature2 from df
+
+  + use Spark SQL stack(N, expr*) function
+    the number of columns will be decided by `count(# of expr*)/N`
+    the expr* must have the same datatypes for the same specified column
+
+    df = spark.createDataFrame([("G",4,2,None),("H",None,4,5)]).toDF("A","X","Y", "Z")
+    +---+----+---+----+
+    |  A|   X|  Y|   Z|
+    +---+----+---+----+
+    |  G|   4|  2|null|
+    |  H|null|  4|   5|
+    +---+----+---+----+
+
+    df.selectExpr("stack(3, 'X', X, 'Y', Y, 'Z', Z)").show()                                                           
+    +----+----+
+    |col0|col1|
+    +----+----+
+    |   X|   4|
+    |   Y|   2|
+    |   Z|null|
+    |   X|null|
+    |   Y|   4|
+    |   Z|   5|
+    +----+----+
+
+    where N=3, thus will be divided into 3 Row, each rows are ('X', X), ('Y', Y) and ('Z', Z)
+
+    cols = df.columns[1:]
+    sql_expr = 'stack({}, {}) AS (type, val)'.format(len(cols), ','.join(["'{0}',string({0})".format(c) for c in cols]))
+    # "stack(3, 'X',string(X),'Y',string(Y),'Z',string(Z)) AS (type, val)"
+    df.selectExpr('A', sql_expr).where('val is not null').show()
+
+
+
+
+
+
+
+
+
