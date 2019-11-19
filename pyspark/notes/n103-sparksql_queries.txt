@@ -68,9 +68,10 @@ SELECT [hints, ...] [ALL|DISTINCT] named_expression[, named_expression, ...]
 
         IF(coalesce(col1, col2, col3, col4) is NULL, 'val1', 'val2')
 
-   (2) filter by if (A <=> B) | (A is NULL) | (B is NULL), using nullif()
+   (2) filter by if (A <=> B) | (A is NULL) | (B is NULL), using coalesce() or nvl()
 
-        df.filter('nullif(GENDER, DOB) is NULL')         <-- GENDER and DOB are equal, not at least one is NULL
+        df.where('coalesce(A, B) <=> coalesce(B, A)')    <-- cover A is NULL, B is NULL and A <=> B
+        df.filter('nullif(A, B) is NULL')                <-- doesnot cover `B is NULL`
 
       
 
