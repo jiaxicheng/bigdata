@@ -70,7 +70,9 @@ Functions only in Spark SQL, not in DataFrame API
 
 Functions only in SparkSQL which can be simulated with DF API:
 ---
- + if,ifnull,nvl,nvl2,nullif ->  df:{when,otherwise}
+ + if,nvl2,nullif ->  df:{when,otherwise}
+ + nvl,ifnull  -> df:coalesce  coalesce can have more then 2 arguments, 
+     notice also that nanvl() is used only on FloatType or DoubleType 
  + left, right -> df:substring  left(A,2) -> substring('A',1,2)  right(A,2) -> substring('A',-2,2)
  + position -> df:{instr,locate}
  + printf -> df:format_string
