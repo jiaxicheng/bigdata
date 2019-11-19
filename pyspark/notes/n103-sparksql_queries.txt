@@ -62,6 +62,16 @@ SELECT [hints, ...] [ALL|DISTINCT] named_expression[, named_expression, ...]
            SELECT d.arg1, d.arg2, d.arg3, e.* FROM d LATERAL VIEW OUTER inline(d.t) e 
        ''').show()  
 
++ WHERE:
+  + some special cases:
+   (1) check if multiple columns are NULL at the same time
+
+        IF(coalesce(col1, col2, col3, col4) is NULL, 'val1', 'val2')
+
+   (2) filter by if (A <=> B) | (A is NULL) | (B is NULL), using nullif()
+
+        df.filter('nullif(GENDER, DOB) is NULL')         <-- GENDER and DOB are equal, not at least one is NULL
+
       
 
 + JOIN:
