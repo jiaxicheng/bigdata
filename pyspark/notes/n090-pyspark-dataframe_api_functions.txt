@@ -1,7 +1,8 @@
 Some notes on Dataframe buitin API functions:
 
 ---
-  + lit(): can NOT used on list, dict
+  + lit(): can NOT used on list, dict, use F.array, F.struct, F.create_map instead
+    Note: Scala supports typedLit() which does support Seq, Map etc.
 
   + split(col, ptn):  split by ' ' or '\s+' will not automatically remove leading/trailing whitespaces
     Example:
@@ -59,6 +60,11 @@ Some notes on Dataframe buitin API functions:
          with which to start window intervals.
          + startTime must be less than windowDuration and greater than -windowDuration (-windowDuration, windowDuration)
 
+  + collect_list()
+    + NULL item is skipped from collect_list, so we use `if(col2='X',1,NULL)` as list item, when there is any col2='X'
+      the size of the collect_list > 0
 
+        df.withColumn('has_X', expr("size(collect_list(if(col2='X',1,NULL)) OVER (partition by col1))>0")) \
+          .filter("col2 = 'X' OR !has_X").show()
 
 
