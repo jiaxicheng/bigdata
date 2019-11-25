@@ -1,0 +1,68 @@
+Data sampling under different contexts:
+
+
+
+pyspark.RDD:
+---
+  + randomSplit(weights, seed=None)
+    + withReplacement = False
+    + weights willbe normalized so the sum becomes 1.0
+  + sample(withReplacement, fraction, seed=None)
+  + sampleByKey(withReplacement, fractions, seed=None)
+
+
+
+pyspark.sql.DataFrame:
+---
+  + randomSplit(weights, seed=None)
+  + sample(withReplacement=None, fraction=None, seed=None)
+  + sampleBy(col, fractions, seed=None)
+    + withReplacement = False
+
+
+
+pyspark.sql.DataFrameStatFunctions:
+---
+  + sampleBy(col, fractions, seed=None)
+  Notes:
+   (1) Example-1: sample from a large dataset, take a fraction of a col-value 
+       for cat in categories:
+           model_fit(df.sampleBy('col', {cat:0.1}))
+      
+
+
+Spark SQL Block Sampling:   withReplacement=None
+---
+  + TABLESAMPLE(n PERCENT)
+
+    SELECT * FROM t_df TABLESAMPLE(0.1 PERCENT) t;
+
+  + TABLESAMPLE (n ROWS)
+    the row count given by user is applied to each split. So total row count can be vary by number of 
+    input splits. For example, the following query will take the first 10 rows from each input split:
+
+      SELECT * FROM t_df TABLESAMPLE(10 ROWS) t;
+
+  + TABLESAMPLE (ByteLengthLiteral)  <-- Only work with Apache Hive (not Spark SQL)
+    + ByteLengthLiteral: (digit) + ('b' | 'B' | 'k' | 'K' | 'm' | 'M' | 'g' | 'G')
+    
+      SELECT * FROM t_df TABLESAMPLE(100M) t;
+
+Notes:
+ (1) SparkSQL can take sample by exact # of Rows. 
+     ref: https://cwiki.apache.org/confluence/display/Hive/LanguageManual+Sampling
+     Need more knowledge regarding split and #Rows
+ (2) Spark will merge partition as much as possible by using `TABLESAMPLE(10 ROWS)`
+
+       spark.range(100000, numPartitions=20).createOrReplaceTempView('sdf')
+       spark.sql("SELECT *, spark_partition_id()  from sdf TABLESAMPLE(10 ROWS)").rdd.getNumPartitions() -> 1
+       spark.sql("SELECT *, spark_partition_id()  from sdf").rdd.getNumPartitions()                      -> 20
+       #This returns exactly 10 rows
+
+
+Example-1: sample a subset of users
+  REF: https://stackoverflow.com/questions/58969157/recommendation-for-subset-of-users
+    ratio = 200000/32000000
+    df_users = df.select('user').distinct().sample(False, ratio)
+    df_new = df.join(df_users, on=['user'], how='left_semi')
+  Note: this is calculated by a fraction
