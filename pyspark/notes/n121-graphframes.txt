@@ -1,0 +1,63 @@
+Graphframes for Python:
+
+Links:
+ - Download jars: https://spark-packages.org/package/graphframes/graphframes
+ - Documentation: https://graphframes.github.io/graphframes/docs/_site/api/python/graphframes.html
+ - Scala Docs   : https://spark.apache.org/docs/latest/graphx-programming-guide.html
+ - databriks    : https://docs.databricks.com/spark/latest/graph-analysis/graphframes/user-guide-python.html
+SO Links:
+ - Alex Orter: https://stackoverflow.com/users/11055042/alex-ortner
+
+
+class graphframes.GraphFrame(v, e)
+---
+ + params:
+   + v: DataFrame holding vertex information. Must contain a column named ¡°id¡± that stores unique vertex IDs.
+   + e: DataFrame holding edge information. Must contain two columns src and dst storing source vertex IDs 
+        and destination vertex IDs of edges, respectively.
+ + attributes:
+   + edges: a dataframe holding edge information
+   + vertices: a dataframe holding vertex information
+   + degrees: the degrees of each vertex in the graph: union of inDegrees + outDegrees
+   + inDegrees: df including frequency of entries in `dst`
+   + outDegrees: df including frequency of entries in `src`
+   + pregel: Get the graphframes.lib.Pregel object for running pregel
+   + triplets: (source vertex)-[edge]->(destination vertex) for all edges in the graph
+ + methods:
+   + aggregateMessages(aggCol, sendToSrc=None, sendToDst=None)
+     aggregate messages from the neighbours
+   + bfs(fromExpr, toExpr, edgeFilter=None, maxPathLength=10)
+     breadth-first search:
+   + connectedComponents(algorithm='graphframes', checkpointInterval=2, broadcastThreshold=1000000)
+     computes the connected components of the graph
+     + algorithm: "graphframes" or "graphx"
+     + checkpointInterval: checkpoint interval in terms of number of iterations
+     + broadcastThreshold: broadcast threshold in propagating component assignments (default: 1000000)
+   + dropIsolatedVertices()
+     + Drops isolated vertices, vertices are not contained in any edges.
+   + filterEdges(condition)
+     Filters the edges based on expression, keep all vertices.
+   + filterVertices(condition)
+   + find(pattern)
+   + labelPropagation(maxIter)
+   + pageRank(resetProbability=0.15, sourceId=None, maxIter=None, tol=None)
+   + parallelPersonalizedPageRank(resetProbability=0.15, sourceIds=None, maxIter=None)
+   + svdPlusPlus(rank=10, maxIter=2, minValue=0.0, maxValue=5.0, gamma1=0.007, gamma2=0.007, gamma6=0.005, gamma7=0.015)
+   + shortestPaths(landmarks)
+     Runs the shortest path algorithm from a set of landmark vertices in the graph.
+     + landmarks: a set of one or more landmarks
+   + stronglyConnectedComponents(maxIter)
+   + triangleCount()
+   + cache()
+     persist()
+     unpersist()
+
+
+Examples:
+---
+TODO
+
+
+
+
+
