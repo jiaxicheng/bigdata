@@ -1,3 +1,10 @@
+Continue..
+
+pandas_udf and related applications:
+---
+
+Example-3: cumprod + GROUPED_MAP
+
 https://stackoverflow.com/questions/59212758/pandas-to-pyspark-cumprod-function
 
 Using PandasUDFType.GROUPED_MAP when PandasUDFType.GROUPED_AGG is not applicable:
@@ -50,4 +57,66 @@ Method-2: for Spark 2.4+, using Window + collect_list + aggregate
     |1   |5   |0.6 |[0.09999999999999998, 0.87, 0.5, 0.0, 0.4]|0.0   |
     +----+----+----+------------------------------------------+------+
 
+
+
+
+Example-4: jaro distance + list comprehension + PandasUDFType.SCALAR
+  Notes: input Series, output Series in the same size
+         used in withColumn or select list.
+
+   REF: 
+    [1] question post: https://stackoverflow.com/questions/59212255
+    [2] discussion df.apply: https://stackoverflow.com/questions/52673285
+
+    from pyspark.sql.functions import pandas_udf, PandasUDFType
+    from pyjarowinkler import distance
+    from pandas import Series
+
+    # preferred method
+    @pandas_udf("float", PandasUDFType.SCALAR)
+    def get_distance(col1, col2):
+       return Series([ distance.get_jaro_distance(x, y, winkler=True, scaling=0.1) for x,y in zip(col1, col2)])
+
+    df.withColumn('jaro_distance', get_distance('x', 'y')).show()
+    +---+---+---+-------------+
+    |  x|  y|  z|jaro_distance|
+    +---+---+---+-------------+
+    | AB| 1B|  2|         0.67|
+    | BB| BB|  4|          1.0|
+    | CB| 5D|  6|          0.0|
+    | DB|B7F|  8|         0.61|
+    +---+---+---+-------------+
+
+
+
+
+Example-5: Timestamp functions + replace + PandasUDFType.SCALAR
+---
+    REF: https://stackoverflow.com/questions/59063138/run-pyspark-date-column-thru-datetime-pandas-function
+
+    df = spark.range(10) \
+        .withColumn('pd_date', expr('timestamp(from_unixtime(unix_timestamp(now())+monotonically_increasing_id()*2500))')) 
+
+    from pyspark.sql.functions import expr, pandas_udf, PandasUDFType 
+    from pandas import Series
+
+    @pandas_udf('timestamp', PandasUDFType.SCALAR)
+    def add_one(pd_date):
+        return Series([ t.replace(hour=7,minute=0) if t.minute > 30 else t for t in pd_date.tolist() ])
+
+    df.withColumn('ao', add_one('pd_date')).show()                                                                     
+    +---+-------------------+-------------------+
+    | id|            pd_date|                 ao|
+    +---+-------------------+-------------------+
+    |  0|2019-12-06 21:42:09|2019-12-06 07:00:09|
+    |  1|2019-12-06 22:23:49|2019-12-06 22:23:49|
+    |  2|2019-12-06 23:05:29|2019-12-06 23:05:29|
+    |  3|2019-12-06 23:47:09|2019-12-06 07:00:09|
+    |  4|2019-12-07 00:28:49|2019-12-07 00:28:49|
+    |  5|2019-12-07 01:10:29|2019-12-07 01:10:29|
+    |  6|2019-12-07 01:52:09|2019-12-07 07:00:09|
+    |  7|2019-12-07 02:33:49|2019-12-07 07:00:49|
+    |  8|2019-12-07 03:15:29|2019-12-07 03:15:29|
+    |  9|2019-12-07 03:57:09|2019-12-07 07:00:09|
+    +---+-------------------+-------------------+
 
