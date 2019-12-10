@@ -47,3 +47,69 @@ Spark SQL higher-order functions:
             )
          """)).show(truncate=False)
 
+    Example-12.1: 
+ 
+    df = spark.createDataFrame([
+        ([[5.0],[25.0,25.0],[40.0]],"c"), 
+        ([[5.0],[25.0, 80.0]],"d"),
+        ([[5.0],[25.0, 75.0]],"e")
+       ],["B", "C"])
+
+    df.withColumn("Avg", expr("""
+        aggregate(
+            flatten(B)
+          , (double(0) as total, int(0) as cnt) 
+          , (x,y) -> (x.total+y, x.cnt+1)
+          , z -> round(z.total/z.cnt,2)
+        )
+     """)).show()
+    +-----------------------------+---+-----+
+    |B                            |C  |Avg  |
+    +-----------------------------+---+-----+
+    |[[5.0], [25.0, 25.0], [40.0]]|c  |23.75|
+    |[[5.0], [25.0, 80.0]]        |d  |36.67|
+    |[[5.0], [25.0, 75.0]]        |e  |35.0 |
+    +-----------------------------+---+-----+
+
+
+
+(13) array_contains for one-hot-encoding
+  REF: https://stackoverflow.com/questions/59222061
+
+    df = spark.createDataFrame([
+             (1, 'London|Paris|Tokyo'),
+             (2, 'Tokyo|Barcelona|Mumbai|London'),
+             (3, 'Vienna|Paris|Seattle')
+         ], ['ID','CITY'])
+
+  Method-1: use splt + array_contains:
+
+    df.withColumn('cities', split('CITY', '\|')) \ 
+      .select('ID', *[ array_contains('cities', c).astype('int').alias(c) for c in city_of_interest ]) \ 
+      .show()
+
+  Method-2: use regexp_replace + find_in_set (reference only)
+
+    df.withColumn('cities', regexp_replace('CITY', '\|', ',')) \
+      .selectExpr('ID', *[ 'int(find_in_set("{0}",cities)>0) as `{0}`'.format(c) for c in city_of_interest ]) \
+      .show()
+    +---+-----+-------+-----+
+    | ID|Paris|Seattle|Tokyo|
+    +---+-----+-------+-----+
+    |  1|    1|      0|    1|
+    |  2|    0|      0|    1|
+    |  3|    1|      1|    0|
+    +---+-----+-------+-----+
+
+  Method using Pandas:
+
+    df[city_of_interest] = df.CITY.str.get_dummies()[city_of_interest]
+    df = df.drop('CITY', axis=1)
+
+
+
+
+
+
+
+
