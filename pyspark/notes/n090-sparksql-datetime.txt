@@ -54,6 +54,10 @@ Notes:
       , tinyint/smallint/int/bigint, float/double, decimal
   (2) date_trunc(fmt, ts) convert timestamp to timestamp, when you need a `Timestamp`
       trunc convert DateType into a StringType: when you need a `Date`
+  (3) Interval used with Datafram API function:
+      interval can not use col_name, i.e. `INTERVAL col1 months` is not working
+      df.withColumn('10_days_before', 'datetime_col' - expr('INTERVAL 10 days'))
+      
 
 
 Some References: 
