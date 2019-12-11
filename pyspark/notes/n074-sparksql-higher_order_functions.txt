@@ -7,12 +7,12 @@ https://stackoverflow.com/questions/57811151/how-to-concat-corresponding-element
 
 join and merge cols1 and col2 into col3, see below:
 
-    >>> df.withColumn('col3', expr("
+    >>> df.withColumn('col3', expr("""
             array_join(
                 transform(sequence(0, size(col1)-1), i -> CONCAT(col1[i], ':', col2[i]))
               , '_'
             )
-      ")).show()
+      """)).show()
     +------+----------+-----------+
     |  col1|      col2|       col3|
     +------+----------+-----------+
@@ -22,6 +22,10 @@ join and merge cols1 and col2 into col3, see below:
 Another way: using `zip_with()` to replace `transform() + sequence()`
 
     zip_with(col1, col2, (x,y) -> concat(x,':',y))
+
+Another way: using `transform()` only:
+
+    transform(col1, (x,i) -> CONCAT(x, ':', col2[i])) 
 
 
 (2) filter:
@@ -193,5 +197,36 @@ https://stackoverflow.com/questions/58156078/pyspark-compare-empty-map-literal/5
     |2000-01-01 17:00:01|2000-01-01 18:00:00|
     |2000-01-01 18:00:01|2000-01-01 19:00:00|
     +-------------------+-------------------+
+
+
+(7) Use slice, transform, filter etc to find top-N (based on count) element in an array columns:
+    REF: https://stackoverflow.com/questions/58281219
+
+    N = 2
+    df1.withColumn('topN', F.expr("""
+        transform(
+          slice(
+              sort_array(
+                  transform(
+                      array_distinct(value_list)
+                    , x -> array(size(filter(value_list, y -> y == x)), x)
+                  )
+                , False
+              )       
+            , 1     
+            , {0} 
+          ), z -> z[1]     
+        )
+      """.format(N))).show(truncate=False)
+    +---+-----------------------+-------+                                           
+    |id |value_list             |topN   |
+    +---+-----------------------+-------+
+    |5  |[12, 12]               |[12]   |
+    |1  |[9, 6, 6, 9, 53]       |[9, 6] |
+    |3  |[1, 1, 1, 1]           |[1]    |
+    |2  |[1, 2, 85, 2, 85, 1, 1]|[1, 85]|
+    |4  |[2, 2]                 |[2]    |
+    +---+-----------------------+-------+
+
 
 
