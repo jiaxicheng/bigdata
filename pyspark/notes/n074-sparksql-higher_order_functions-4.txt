@@ -108,6 +108,59 @@ Spark SQL higher-order functions:
 
 
 
+(14) array_distinct + transform + size: do aggregation
+   REF: https://stackoverflow.com/questions/59281773/spark-how-to-get-distinct-values-with-their-count
+
+    from pyspark.sql.functions import collect_list
+
+    df = spark.read.csv('/home/xicheng/test/groupby-1.txt', header=True)
+
+    df.groupby('name').agg(collect_list('food').alias('foods'), collect_list('drink').alias('drinks')) \
+      .selectExpr(
+          'name' 
+        , 'transform(array_distinct(drinks), d -> array(d, size(filter(drinks, x -> x = d)))) as drinks' 
+        , 'transform(array_distinct(foods), d -> array(d, size(filter(foods, x -> x = d)))) as foods' 
+      ).show(truncate=False) 
+    +----+-----------------------+-------------------------+                        
+    |name|drinks                 |foods                    |
+    +----+-----------------------+-------------------------+
+    |Dave|[[soda, 1]]            |[[salad, 1]]             |
+    |John|[[water, 2], [soda, 1]]|[[salad, 1], [burger, 2]]|
+    +----+-----------------------+-------------------------+
+
+  Notes:
+    (1) the following return a struct: array<struct<d:string,col2:int>> 
+
+            transform(drinks, d -> (d, size(filter(drinks, x -> x = d)))) as drinks
+
+        the following is better with named struct:
+
+            transform(array_distinct(drinks), d -> (d as drink, size(filter(drinks, x -> x = d)) as cnt)) as drinks
+
+        the following return array of strings:
+            
+            transform(drinks, d -> array(d, size(filter(drinks, x -> x = d)))) as drinks
+
+    (2) Scala code for reference:
+
+      import org.apache.spark.sql.functions.collect_list
+
+      val df = Seq(("John", "salad"),("Dave", "salad"),("John", "burger"),("John", "burger")).toDF("name","food")
+
+      val df_new = (df.groupBy("name").agg(collect_list("food").alias("foods")) 
+        .selectExpr(
+            "name"
+          , "transform(array_distinct(foods), d ->array(d, size(filter(foods, x -> x = d)))) as foods"
+       ))
+
+       df_new.show(2,0)
+       +----+-------------------------+                                                
+       |name|foods                    |
+       +----+-------------------------+
+       |Dave|[[salad, 1]]             |
+       |John|[[salad, 1], [burger, 2]]|
+       +----+-------------------------+
+
 
 
 
