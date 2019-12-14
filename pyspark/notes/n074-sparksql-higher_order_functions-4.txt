@@ -163,6 +163,61 @@ Spark SQL higher-order functions:
 
 
 
+(15) transform + filter to find the first non-null values in a embedded struct/array
 
+    REF: https://stackoverflow.com/questions/59316791/json-iteration-in-spark
+    Find the first non-null value in a array fields using transform + filter SQL using LATERAL VIEW + inline function
+
+    Scala version:
+    
+    val df = spark.read.option("multiLine","true").json("/home/xicheng/test/json-6.txt")
+    
+    # Method-1: using API functions:
+    
+      val df1 = df.selectExpr("inline(CarBrands)")
+    
+      df1.selectExpr(
+            "model"
+          , "transform(filter(dealerspot, x -> x.dealername[0] is not null), y -> y.dealername[0])[0] AS dealername"
+          , "transform(filter(dealerspot, x -> x.dealerlat[0] is not null), y -> y.dealerlat[0])[0] AS dealerlat"
+      ).show
+      +-----+----------+---------+
+      |model|dealername|dealerlat|
+      +-----+----------+---------+
+      | audi|   "first"|  "45.00"|
+      |  bmw|  "sports"|  "99.00"|
+      |  toy|  "nelson"|  "35.00"|
+      +-----+----------+---------+
+      
+    
+    Mehotd-2: using Spark SQL:
+    
+      df.createOrReplaceTempView("df_table")
+    
+      spark.sql("""
+    
+          SELECT m.model
+          ,      trim(BOTH '"' FROM 
+                   transform(
+                       filter(m.dealerspot, x -> x.dealername[0] is not null)
+                     , y -> y.dealername[0]
+                   )[0]
+                 ) AS dealername
+          ,      trim(BOTH '"' FROM
+                   transform(
+                       filter(m.dealerspot, x -> x.dealerlat[0] is not null)
+                     , y -> y.dealerlat[0]
+                   )[0]
+                 ) AS dealerlat
+          FROM df_table LATERAL VIEW OUTER inline(CarBrands) m
+    
+      """).show
+      +-----+----------+---------+
+      |model|dealername|dealerlat|
+      +-----+----------+---------+
+      | audi|     first|    45.00|
+      |  bmw|    sports|    99.00|
+      |  toy|    nelson|    35.00|
+      +-----+----------+---------+
 
 
