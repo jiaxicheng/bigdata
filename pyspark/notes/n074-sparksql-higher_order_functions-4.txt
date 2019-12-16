@@ -220,4 +220,17 @@ Spark SQL higher-order functions:
       |  toy|    nelson|    35.00|
       +-----+----------+---------+
 
+    Method-3: using get_json_object + to_json
+
+      import org.apache.spark.sql.functions.{get_json_object,to_json,trim,explode}
+
+      val df1 = (df.withColumn("data", explode($"CarBrands")) 
+          .select("data.*") 
+          .withColumn("dealerspot", to_json($"dealerspot")))
+
+      df1.select(
+            $"model"
+          , trim(get_json_object($"dealerspot", "$[*].dealername[0]"), "\"\\") as "dealername"
+          , trim(get_json_object($"dealerspot", "$[*].dealerlat[0]"), "\"\\") as "dealerlat"
+      ).show
 
