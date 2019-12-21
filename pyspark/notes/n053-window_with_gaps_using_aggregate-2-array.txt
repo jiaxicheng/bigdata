@@ -1,0 +1,74 @@
+https://stackoverflow.com/questions/57186107/pyspark-iterate-over-groups-in-a-dataframe
+
+Using aggregate function and concat an array to do the aggregation/reduce:
+Related posts:
+ + https://github.com/jiaxicheng/bigdata/blob/master/pyspark/notes/n053-window_with_gaps_using_aggregate.txt
+ + https://github.com/jiaxicheng/bigdata/tree/master/pyspark/codes/053-window-with-gaps
+
+(1) Use groupby + array_sort + collect_list + struct to create a sorted array column `data`
+(2) Use aggregate function to iterate through this array column
+    initial an array of structs: `array<struct<date:timestamp,Updated_date:timestamp,LB:date>>`
+(3) if element_at(acc, -1).date is NULL, meaning the first item, then 
+        array((y.date as date, y.Updated_date as Updated_date, y.LB as LB))
+    elif y.date is between element_at(acc, -1).LB AND date_add(element_at(acc, -1).LB, 20) meaning use the existing LB
+        append (y.date as date, y.Updated_date as Updated_date, element_at(acc, -1).LB as LB)
+    else (use the current y.LB as the new LB)
+        append array((y.date as date, y.Updated_date as Updated_date, y.LB as LB))
+(4) Use inline function to explode the array of structs
+(5) calculate UB which is date_add(LB, 20)
+
+Code:
+
+    from pyspark.sql.functions import array_sort, struct, collect_list
+
+    df = spark.read.csv('/home/xicheng/test/window-8.txt', header=True, inferSchema=True)
+    
+    df1 = (df.selectExpr('*', 'date_sub(date,10) as LB') 
+        .groupby('id')
+        .agg(array_sort(collect_list(struct('Updated_date', 'date', 'LB'))).alias('data')))
+    
+    
+    df_new = df1.selectExpr("id", """ 
+    
+       inline(   
+         aggregate(data, 
+           /* initialize is important, specify data types of all fields */
+           array((timestamp(Null) as date, timestamp(Null) as Updated_date, date(NULL) as LB)), 
+           (acc, y) -> 
+             CASE  
+               /* for the first element, no concat */
+               WHEN element_at(acc, -1).date is NULL THEN
+                 array((y.date as date, y.Updated_date as Updated_date, y.LB as LB))
+               /* if y.date is in the existing [LB, UB], then use existing boundary */
+               WHEN y.date BETWEEN element_at(acc, -1).LB AND date_add(element_at(acc, -1).LB, 20) THEN 
+                 concat(acc 
+                   , array((y.date as date, y.Updated_date as Updated_date, element_at(acc, -1).LB as LB)) 
+                 )  
+               /* else use y.LB as the new LB */
+               ELSE 
+                 concat(acc 
+                   , array((y.date as date, y.Updated_date as Updated_date, y.LB as LB)) 
+                 )  
+             END  
+         ) 
+       )      
+    
+     """).selectExpr('*', 'date_add(LB, 20) as UB')
+
+    df_new.show(truncate=False) 
+    +---+-------------------+-------------------+----------+----------+             
+    | id|               date|       Updated_date|        LB|        UB|
+    +---+-------------------+-------------------+----------+----------+
+    |  b|2019-01-25 00:00:00|2018-11-15 10:36:59|2019-01-15|2019-02-04|
+    |  b|2019-02-10 00:00:00|2018-11-16 10:58:01|2019-01-31|2019-02-20|
+    |  b|2019-02-04 00:00:00|2018-11-17 10:42:12|2019-01-31|2019-02-20|
+    |  b|2019-02-10 00:00:00|2018-11-24 10:24:56|2019-01-31|2019-02-20|
+    |  b|2019-02-02 00:00:00|2018-12-01 10:28:46|2019-01-31|2019-02-20|
+    |  a|2019-02-14 00:00:00|2018-10-30 10:25:45|2019-02-04|2019-02-24|
+    |  a|2019-02-14 00:00:00|2018-11-28 10:51:34|2019-02-04|2019-02-24|
+    |  a|2019-01-11 00:00:00|2018-11-29 10:46:07|2019-01-01|2019-01-21|
+    |  a|2019-01-14 00:00:00|2018-11-30 10:42:56|2019-01-01|2019-01-21|
+    |  a|2019-01-16 00:00:00|2018-12-01 10:28:46|2019-01-01|2019-01-21|
+    |  a|2019-01-22 00:00:00|2018-12-02 10:22:06|2019-01-12|2019-02-01|
+    +---+-------------------+-------------------+----------+----------+
+
