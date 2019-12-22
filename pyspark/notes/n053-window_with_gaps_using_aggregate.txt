@@ -1,126 +1,203 @@
-https://stackoverflow.com/questions/59429032/find-the-start-time-and-end-time-when-temperature-is-changed-1degree-in-spark-sq
 
-Using aggregate function with a complex DataType (struct<ret:array<start_ts:timestamp,end_ts:timestamp>,Temp:double>)
-and using concat for array aggregation based on conditions. This can help resolve the following issues which require
-udf:
-  + https://github.com/jiaxicheng/bigdata/tree/master/pyspark/codes/053-window-with-gaps
-  + https://github.com/jiaxicheng/bigdata/tree/master/pyspark/scala_udf
-
-The following code tries to solve the following problem(not the same as OP's question):
+Solving the window with Gap issues using aggregate function of Spark 2.4+
 ---
- (1) For the same ID, sorted by Timestamp, Temperature `Temp(F)` must be continuously dropped
- (2) Start a new Window whenever the Temp(F) drop is greater than 1.0
+Steps:
+  (1) groupby and create an sorted ArrayType column with collect_list() and array_sort()
+  (2) Using aggregate function, protocal see below:
 
-    from pyspark.sql.functions import (lag, expr, sum as fsum, col, when, coalesce, lit
-        , max as fmax, array_sort, struct, collect_list)
-    
-    from pyspark.sql import Window
-    
-    df = spark.read.csv('/home/xicheng/test/window-7-1.txt', header=True, inferSchema=True)
-    
-    w1 = Window.partitionBy('ID').orderBy('TimeStamp')
-    w2 = Window.partitionBy('ID', 'g')
-    
-    df1 = (df.withColumn('is_fallen', coalesce(lag('Temp(F)').over(w1) > col('Temp(F)'),lit(True))) 
-        .withColumn('g', fsum(when(col('is_fallen'),0).otherwise(1)).over(w1)) 
-        .withColumn('g_is_fallen', fmax('is_fallen').over(w2)) 
-        .filter('g_is_fallen'))
-           
-    df1.show()
-    +---+-------------------+-------+---------+---+-----------+                     
-    | ID|          TimeStamp|Temp(F)|is_fallen|  g|g_is_fallen|
-    +---+-------------------+-------+---------+---+-----------+
-    |  1|2019-12-20 10:08:35|   74.1|     true|  0|       true|
-    |  1|2019-12-20 10:09:37|   73.7|     true|  0|       true|
-    |  1|2019-12-20 10:10:32|   73.5|     true|  0|       true|
-    |  1|2019-12-20 10:12:02|   73.0|     true|  0|       true|
-    |  1|2019-12-20 10:13:35|   73.3|    false|  1|       true|
-    |  1|2019-12-20 10:14:37|   73.0|     true|  1|       true|
-    |  1|2019-12-20 10:15:43|   72.7|     true|  1|       true|
-    |  1|2019-12-20 10:16:47|   72.4|     true|  1|       true|
-    |  1|2019-12-20 10:17:57|   72.0|     true|  1|       true|
-    |  3|2019-12-20 10:09:40|   74.0|     true|  0|       true|
-    |  3|2019-12-20 10:15:42|   72.7|     true|  0|       true|
-    |  2|2019-12-20 10:08:40|   74.3|     true|  0|       true|
-    |  2|2019-12-20 10:09:40|   74.2|     true|  0|       true|
-    |  2|2019-12-20 10:12:40|   73.3|     true|  0|       true|
-    |  2|2019-12-20 10:13:40|   73.1|     true|  0|       true|
-    |  2|2019-12-20 10:14:40|   72.9|     true|  0|       true|
-    |  2|2019-12-20 10:16:40|   72.5|     true|  0|       true|
-    |  2|2019-12-20 10:17:40|   72.3|     true|  0|       true|
-    |  2|2019-12-20 10:18:40|   72.0|     true|  0|       true|
-    |  2|2019-12-20 10:22:50|   73.0|    false|  3|       true|
-    +---+-------------------+-------+---------+---+-----------+
-    
-    df2 = df1.groupby('ID', 'g').agg(array_sort(collect_list(struct('TimeStamp', col('Temp(F)').alias('Temp')))).alias('lst'))
+      case class ArrayAggregate(
+         argument: Expression,
+         zero: Expression,
+         merge: Expression,
+         finish: Expression
+      )
 
-"""
-+++++++++++++++++++++++++++++++++++++++++++++++++++++++
-     Window - with Gap solution using aggregate
-+++++++++++++++++++++++++++++++++++++++++++++++++++++++
-(1) create a struct  with schema: `struct<ret:array<start_ts:timestamp,end_ts:timestamp>,Temp:double>`
-(2) x is accumulator with the above schema and y is the new value which is `struct<TimeStamp:timestamp,Temp:double>`
-(3) iterate through the array_sort(collect_list(..))
-    (3.1) if the last item of x.ret has start_ts is NULL:
-       start a new sequence, adjust the last item of x.ret to `named_struct('start_ts', y.TimeStamp, 'end_ts', NULL)` 
-       and x.Temp to `y.Temp`
-    (3.2) elif x.Temp - y.Temp >= 1.0: 
-       close and save an existing sequence `(element_at(x.ret, -1).start_ts as start_ts, y.TimeStamp as end_ts)`
-       and append a new NULL item (NULL as start_ts, NULL as end_ts)
-       reset `Temp` to 0, this value does not matter, it will be reset in (3.1)
-    (3.3) else
-       keep as is: named_struct('ret', x.ret, 'Temp', x.Temp)
-(4) retrieve the ret field from the above aggregation result which is an array of structs
-(5) filter out items with z.end_ts is NULL (incomplete, the sequence does not satisfy condition)
-(6) use `inline` function to explode the array of structs 
+  (3) argument is the ArrayType column from array_sort(collect_list)
+  (4) zero and merge experssion must have the same dataType and Nullability
+     Notes: Nullability is only ignored on the first level of dataType, if you have
+        an array of structs (like we had in most examples here), you will need to make
+        sure zero part and merge part have the same Nullability. 
+     The simplest solution is to set all initial values to NULL in zero expression
+  (5) merge is the part to implement the logic with SQL statement, usually WHEN/CASE/END
+  (6) For array of structs, use inline to explode and split the fields.
 
-"""
-    df2.selectExpr("ID", "g",""" 
+Example-1: count number of records every 4 hours, the 4 hour window must have no overlap
+           but might have overlap based on the actual data
+
+  REF: https://stackoverflow.com/questions/58221350/pyspark-how-to-aggregate-over-4-hours-windows-in-groups
+
+  Below example use an array<struct<start:timestamp,cnt:int>>
+
+    from pyspark.sql.functions import expr, array_sort, collect_list
     
-       inline(
-         filter(
-           aggregate(
-             lst, 
-             (array((timestamp(NULL) as start_ts, timestamp(NULL) as end_ts)) as ret, double(0) as Temp),
-             (x, y) ->  
+    df = spark.read.csv('/home/xicheng/test/window-9.txt', header=True)
     
-                CASE 
-                  WHEN element_at(x.ret, -1).start_ts is NULL THEN 
-                    named_struct(
-                      'ret', concat(
-                               slice(x.ret,1,size(x.ret)-1),
-                               array(named_struct('start_ts', y.TimeStamp, 'end_ts', NULL))
-                             ), 
-                      'Temp', y.Temp 
-                    )
-                  WHEN x.Temp - y.Temp >= 1.0 THEN
-                    named_struct(
-                      'ret', concat(
-                               slice(x.ret,1,size(x.ret)-1),
-                               array(
-                                 (element_at(x.ret, -1).start_ts as start_ts, y.TimeStamp as end_ts),
-                                 (NULL as start_ts, NULL as end_ts)
-                               )
-                             ), 
-                      'Temp', 0
-                    ) 
-                  ELSE
-                    named_struct('ret', x.ret, 'Temp', x.Temp)
-                  END 
-             ).ret,
+    df1 = (df.withColumn('pdate', expr("to_timestamp(concat(Date_of_purchase, ' ', time_of_purchase),'MM/dd/yy h:mm a')"))
+        .groupby('email')
+        .agg(array_sort(collect_list('pdate')).alias('data')))
     
-           z -> z.end_ts is not NULL
-         )
+    df1.selectExpr('email', """ 
+       inline( 
+         aggregate(data, 
+           array((timestamp(NULL) as start, int(NULL) as cnt)), 
+           (acc, y) -> 
+             CASE 
+               /* initial one */ 
+               WHEN element_at(acc, -1).start is NULL THEN 
+                 array((y as start, 1 as cnt)) 
+               /* within 4 HOUR range, update the last item of the existing array */ 
+               WHEN element_at(acc, -1).start + INTERVAL 4 HOURS >= y THEN 
+                 concat( 
+                   slice(acc,1,size(acc)-1), 
+                   array((element_at(acc, -1).start as start, element_at(acc, -1).cnt+1 as cnt)) 
+                 ) 
+               /* else add a new array item and initial y as start timestamp and cnt to 1 */
+               ELSE 
+                 concat(acc, array((y as start, 1 as cnt))) 
+             END 
+         ) 
        )
+         
+     """).show() 
+    +-------------+-------------------+---+
+    |        email|              start|cnt|
+    +-------------+-------------------+---+
+    |def@gmail.com|2018-11-10 12:17:00|  2|
+    |def@gmail.com|2018-11-10 20:16:00|  3|
+    |abc@gmail.com|2018-11-10 12:10:00|  3|
+    |abc@gmail.com|2018-11-11 06:16:00|  2|
+    +-------------+-------------------+---+
+
+Example-2: set a sub-group label based on the interval of N=6, there is no overlap between label window
+    but could have gaps between adjacent windows.
+
+  REF: https://stackoverflow.com/questions/57102219/finding-non-overlapping-windows-in-a-pyspark-dataframe
+  example dataframe is from the same as https://github.com/jiaxicheng/bigdata/tree/master/pyspark/scala_udf/python
+
+    df1 = mydf.groupby('id').agg(array_sort(collect_list(col('t').astype('int'))).alias('data'))
+
+    df1.selectExpr("id", """
+        inline(
+          aggregate(
+            /* argument */
+            data,
+            /* zero, notice it's important to set all initial values to NULL */
+            array((int(NULL) as t, int(NULL) as t0, int(NULL) as g)),
+            /* merge expression, the main logic in SQL */
+            (acc, y) ->
     
-    """).show(truncate=False) 
-    +---+---+-------------------+-------------------+                               
-    |ID |g  |start_ts           |end_ts             |
-    +---+---+-------------------+-------------------+
-    |1  |0  |2019-12-20 10:08:35|2019-12-20 10:12:02|
-    |1  |1  |2019-12-20 10:13:35|2019-12-20 10:17:57|
-    |3  |0  |2019-12-20 10:09:40|2019-12-20 10:15:42|
-    |2  |0  |2019-12-20 10:08:40|2019-12-20 10:12:40|
-    |2  |0  |2019-12-20 10:13:40|2019-12-20 10:18:40|
-    +---+---+-------------------+-------------------+
+              CASE
+                /* initialize, the first item of each array */
+                WHEN element_at(acc, -1).t is NULL THEN
+                  array(named_struct('t', y, 't0', y, 'g', 0))
+                /* if the distance to t0 is less than 6, use the existing t0 and sub-group label */
+                WHEN y - element_at(acc, -1).t0 < 6 THEN
+                  concat(acc,
+                    array(named_struct('t', y, 't0', element_at(acc, -1).t0, 'g', element_at(acc, -1).g))
+                  )
+                /* otherwise reset t0 to current y and increase sub-group label by 1 */
+                ELSE
+                  concat(acc,
+                    array(named_struct('t', y, 't0', y, 'g', element_at(acc, -1).g+1))
+                  )
+              END
+          ) 
+        )
+    
+    """).show(50)
+    +---+---+---+---+
+    | id|  t| t0|  g|
+    +---+---+---+---+
+    |  1|  0|  0|  0|
+    |  1|  1|  0|  0|
+    |  1|  4|  0|  0|
+    |  1|  7|  7|  1|
+    |  1| 14| 14|  2|
+    |  1| 18| 14|  2|
+    |  3|  0|  0|  0|
+    |  3|  1|  0|  0|
+    |  3|  1|  0|  0|
+    |  3|  2|  0|  0|
+    |  3|  3|  0|  0|
+    |  3|  4|  0|  0|
+    |  3|  6|  6|  1|
+    |  3|  6|  6|  1|
+    |  3|  7|  6|  1|
+    |  3| 11|  6|  1|
+    |  3| 14| 14|  2|
+    |  3| 18| 14|  2|
+    |  3| 20| 20|  3|
+    |  3| 24| 20|  3|
+    |  2|  5|  5|  0|
+    |  2| 20| 20|  1|
+    |  2| 21| 20|  1|
+    |  4|  0|  0|  0|
+    |  4|  1|  0|  0|
+    |  4|  2|  0|  0|
+    |  4|  6|  6|  1|
+    |  4|  7|  6|  1|
+    +---+---+---+---+
+
+  Notes:
+   (1) values of t should not have duplicates, or otherwise it might have some issues when they are shown on the boundary
+
+
+Troubleshooting: 
+
+ERROR: cannot resolve 'aggregate(`data`, ...)' due to data type mismatch: argument 3 requires array<struct<t:int,g:int>> type, however, 'lambdafunction(CASE WHEN (.....)'  is of array<struct<t:int,g:int>> type.
+---
+issue was from: -> ignoreNullability is not propogated recursively. thus the zero values
+should be set to NULL so left.valueContainsNull is true 
+---
+Source code:
+---
+    sql/catalyst/src/main/scala/org/apache/spark/sql/types/DataType.scala
+       def equalsStructurally(
+         from: DataType,
+          to: DataType,
+          ignoreNullability: Boolean = false): Boolean = {
+        (from, to) match {
+          case (left: ArrayType, right: ArrayType) =>
+            equalsStructurally(left.elementType, right.elementType) &&
+              (ignoreNullability || left.containsNull == right.containsNull)
+        
+          case (left: MapType, right: MapType) =>
+            equalsStructurally(left.keyType, right.keyType) &&
+              equalsStructurally(left.valueType, right.valueType) && 
+              (ignoreNullability || left.valueContainsNull == right.valueContainsNull)
+        
+          case (StructType(fromFields), StructType(toFields)) =>
+            fromFields.length == toFields.length &&
+              fromFields.zip(toFields) 
+                .forall { case (l, r) => 
+                  equalsStructurally(l.dataType, r.dataType) &&
+                    (ignoreNullability || l.nullable == r.nullable)
+                }
+    
+          case (fromDataType, toDataType) => fromDataType == toDataType
+        }
+      }
+    
+The aggregate function shown in ${merge.sql}:
+---
+    aggregate(`data`, 
+      array(named_struct('t', CAST(0 AS DOUBLE), 'g', CAST(0 AS INT))), 
+      lambdafunction(
+        CASE 
+          WHEN (element_at(namedlambdavariable(), -1).`t` = CAST(0 AS DOUBLE)) THEN 
+            array(named_struct('t', namedlambdavariable(), 'g', 0)) 
+          WHEN ((namedlambdavariable() - element_at(namedlambdavariable(), -1).`t`) < CAST(6.0BD AS DOUBLE)) THEN 
+            concat(namedlambdavariable(),
+              array(named_struct('t', namedlambdavariable(), 'g', element_at(namedlambdavariable(), -1).`g`))
+            ) 
+          ELSE 
+            concat(namedlambdavariable(), 
+              array(named_struct('t', namedlambdavariable(), 'g', (element_at(namedlambdavariable(), -1).`g` + 1)))
+            ) 
+        END, namedlambdavariable(), namedlambdavariable()
+      ), lambdafunction(namedlambdavariable(), namedlambdavariable())
+    )
+    
+    
+
 
