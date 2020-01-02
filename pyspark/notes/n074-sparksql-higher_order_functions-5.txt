@@ -15,7 +15,7 @@ Spark SQL higher-order functions:
     
   we will implement the logic in the above merge and finish expressions:
 """
-    from pyspark.sql.functions import collect_list, array_sort, struct, to_date
+    from pyspark.sql.functions import collect_list, struct, to_date
     from pyspark.sql import Window
    
     # set the WindowSpec from the current Row to the last Row in the same group
@@ -24,7 +24,7 @@ Spark SQL higher-order functions:
     # convert the start_date to DateType, find sorted collect_list of stryct('start_date', 'used_stock')
     # use aggregate function to calculate the end_date
     df.withColumn('start_date', to_date('start_date', 'dd/MM/yyyy')) \
-      .withColumn('data', array_sort(collect_list(struct('start_date','used_stock')).over(w1))) \
+      .withColumn('data', collect_list(struct('start_date','used_stock')).over(w1)) \
         .selectExpr(
             "group",
             "start_date",
@@ -63,7 +63,7 @@ Spark SQL higher-order functions:
         to rowsBetween(0,N) where N is a number which can cover most of the cases, and then do a second round calculation
         for Row with end_date = NULL using the WindowSpec cover the full length.
 
-    from pyspark.sql.functions import collect_list, array_sort, struct, to_date, col, when, expr
+    from pyspark.sql.functions import collect_list, struct, to_date, col, when, expr
 
     end_date_sql_expr = """
         aggregate(
@@ -90,16 +90,16 @@ Spark SQL higher-order functions:
     w1 = Window.partitionBy('group').orderBy('start_date').rowsBetween(0, Window.unboundedFollowing)
 
     df.withColumn('start_date', to_date('start_date', 'dd/MM/yyyy')) \
-        .withColumn('data', array_sort(collect_list(struct('start_date','used_stock')).over(w2))) \
+        .withColumn('data', collect_list(struct('start_date','used_stock')).over(w2)) \
         .withColumn('end_date', expr(end_date_sql_expr)) \
         .withColumn('data',
-           when(col('end_date').isNull(), array_sort(collect_list(struct('start_date','used_stock')).over(w1)))) \
+           when(col('end_date').isNull(), collect_list(struct('start_date','used_stock')).over(w1))) \
         .selectExpr(
            "group",
            "start_date",
            "`available stock`",
            "used_stock",
-           "IF(end_date is NULL, {0}, end_date) AS end_date_1".format(end_date_sql_expr)
+           "IF(end_date is NULL, {0}, end_date) AS end_date".format(end_date_sql_expr)
         ).show(truncate=False)
     +-------+----------+---------------+----------+----------+                      
     |group  |start_date|available stock|used_stock|end_date_1|
