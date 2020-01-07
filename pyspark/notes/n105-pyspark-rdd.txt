@@ -247,6 +247,14 @@ Notes:
 
           print(rdd.toDebugString().decode('utf-8'))
 
+  (9) RDD dependency types: https://trongkhoanguyen.com/spark/understand-rdd-operations-transformations-and-actions/
+      Narrow dependency: tasks can be executed locally and no shuffle (map, flatMap, filter, sample)
+      Wide dependency: multiple child partitions may depend on one partition of the parent RDD. shuffle is 
+          required unless the parents are hash-partitioned. sortByKey, reduceByKey, join etc.
+      
+  (10) transformations: map, flatMap, filter, sample, mapPartitions, union, intersection, join, cogroup, cartisan, distinct
+             , *ByKey except CountByKey and countByValue
+       Actions: recude, fold, aggregate, collect, take*, first, count, saveAs*, countBy*, foreach
 
 
 pyspark.Broadcast:
