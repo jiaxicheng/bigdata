@@ -18,6 +18,8 @@ Spark SQL higher-order functions:
     from pyspark.sql.functions import collect_list, struct, to_date
     from pyspark.sql import Window
    
+    df = spark.read.csv('/home/xicheng/test/groupby-3.txt', header=True, inferSchema=True)
+
     # set the WindowSpec from the current Row to the last Row in the same group
     w1 = Window.partitionBy('group').orderBy('start_date').rowsBetween(0, Window.unboundedFollowing)
     
@@ -38,9 +40,9 @@ Spark SQL higher-order functions:
                 (date(NULL) as end_date, double(0) as total),
                 /* merge: use acc.total to save accumulated sum of used_stock */
                 (acc, y) ->
-                  IF(acc.total >= `available stock`
-                  ,  (acc.end_date as end_date, acc.total as total)
+                  IF(acc.total < `available stock`
                   ,  (y.start_date as end_date, acc.total + y.used_stock as total)
+                  ,  acc
                   ),
                 /* finish */
                 z -> IF(z.total >= `available stock`, z.end_date, NULL)
@@ -114,4 +116,37 @@ Spark SQL higher-order functions:
     +-------+----------+---------------+----------+----------+
 
     
+(17) For a MapType column, use aggregate to find the key with the max value. 
+    REF: https://stackoverflow.com/questions/59651570/key-corresponding-to-max-value-in-a-spark-map-column
 
+    import org.apache.spark.sql.functions._
+    val mockedDf = (Seq(1, 3)
+        .toDF("id")
+        .withColumn("optimized_probabilities_map", typedLit(Map("foo"->0.34333337, "bar"->0.23))))
+
+    mockedDf.withColumn("optimizer_ruler_name", expr("""
+
+        aggregate(
+          /* map_keys as array entry */
+          map_keys(optimized_probabilities_map), 
+          /* zero_expr: set up buffer with DataType: struct<name:string,val:double> */
+          (string(NULL) as name, double(NULL) as val),
+          /* merge: iterate through map_keys, compare the corresponding value with the buffered acc.val 
+           * and then update acc.name accordingly
+           */
+          (acc, y) ->
+            IF(acc.val is NULL OR acc.val < optimized_probabilities_map[y]
+             , (y as name, optimized_probabilities_map[y] as val)
+             , acc
+            ),
+          /* finish: select only name from the buffer */
+          acc -> acc.name
+        )
+
+    """)).show(false)
+    +---+--------------------------------+--------------------+
+    |id |optimized_probabilities_map     |optimizer_ruler_name|
+    +---+--------------------------------+--------------------+
+    |1  |[foo -> 0.34333337, bar -> 0.23]|foo                 |
+    |3  |[foo -> 0.34333337, bar -> 0.23]|foo                 |
+    +---+--------------------------------+--------------------+
