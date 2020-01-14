@@ -1,6 +1,11 @@
 Using mapping in pyspark:
 
 discover different ways using maps in pyspark code.
+---
+Some notes:
+ (1) explode('map_col') will add two columns with name `key` and `value`
+     similar to inline(struct_col) in SparkSQL
+
 
 
 Example-1: Use Python dict to fillna different value for each column:
@@ -25,6 +30,8 @@ Example-1: Use Python dict to fillna different value for each column:
         d1 = df.freqItems(df.columns)
         mapping = d1.select([ F.col(c)[0].alias(c.split('_')[0]) for c in d1.columns ]).first().asDict()
         df_new = df.select([ when(col(c) == 'nn', mapping[c]).otherwise(col(c)).alias(c) for c in df.columns ])
+
+        Notice: the array items from df.freqItems() are unsorted, can not use item-0 for the most-frequent items.
 
 
 Example-2: Use mapping created from F.create_map() or even F.array()
@@ -60,3 +67,28 @@ Example-2: Use mapping created from F.create_map() or even F.array()
         df.withColumn('values', mapping_a[F.col('event_type')]).show()
 
 
+Example-3: use Spark SQL builtin function `str_to_map` to create Map:
+     REF: https://stackoverflow.com/questions/59675879/pyspark-split-spark
+    
+    Below convert a StringType column `dsp_price_style` into a MapType column and then retrieve the desired keys:
+    
+    from pyspark.sql.functions import expr
+    
+    df = spark.createDataFrame([
+        (0,"1000:10,1001:100,1002:5,1003:7"),
+        (1,"1002:5,1000:100,1001:15,1003:6")
+      ], ['req_id', 'dsp_price_style'])
+    
+    df.withColumn('dsp_price_map', expr("str_to_map(dsp_price_style,',',':')")) \
+        .selectExpr(
+          'req_id', 
+          *sum([ ['{0} as {0}_key'.format(k), 'dsp_price_map["{0}"] as {0}_val'.format(k) ] for k in keys ], [])
+    ).show() 
+    +------+--------+--------+--------+--------+
+    |req_id|1000_key|1000_val|1001_key|1001_val|
+    +------+--------+--------+--------+--------+
+    |     0|    1000|      10|    1001|     100|
+    |     1|    1000|     100|    1001|      15|
+    +------+--------+--------+--------+--------+
+    
+    
