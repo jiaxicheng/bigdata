@@ -91,4 +91,33 @@ Example-3: use Spark SQL builtin function `str_to_map` to create Map:
     |     1|    1000|     100|    1001|      15|
     +------+--------+--------+--------+--------+
     
+
+Example-4: use MapType in the aggregate function of groupby
+  REF:https://stackoverflow.com/questions/60061916/using-pyspark-window-functions-with-conditions-to-add-rows
+
+  Use groupby and collect_set + map_from_entries to create map1 containing variable -> value mapping
+  and then calculate D_value use map1, add this as a new entry 'varD' into map1 and then explode this into Rows.
+
+    from pyspark.sql.functions import expr
     
+    df.groupby('id') \
+      .agg(expr("map_from_entries(collect_set(struct(variable,value))) as map1")) \
+      .withColumn('D_value', expr('IF(map1["varA"] < 16 AND map1["varC"] != -9,2,1)')) \
+      .selectExpr("id", "explode_outer(map_concat(map1, map('varD', D_value))) AS (variable,value)") \
+      .show(truncate=False)
+    +---+--------+-----+
+    |id |variable|value|
+    +---+--------+-----+
+    |1  |varB    |1    |
+    |1  |varC    |-9   |
+    |1  |varA    |30   |
+    |1  |varD    |1    |
+    +---+--------+-----+
+    
+  WHERE:
+  (1) groupby id and create a MapType column `map1` using `map_from_entries(collect_set(struct(variable,value)))`
+  (2) calculate D_value using this MapType column
+  (3) Add a new entry map('varD', D_value) to this MapType column
+  (4) explode the resulting Map.
+
+
