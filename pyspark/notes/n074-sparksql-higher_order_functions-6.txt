@@ -1,0 +1,66 @@
+Continue..
+
+Spark SQL higher-order functions:
+
+(19) using aggregate to calculate stateful values from the previous rows
+  REF: https://stackoverflow.com/questions/60109004/can-we-dynamically-retrieve-previous-rows-value-of-a-updating-column-in-pyspark
+  Using the same method shown in https://github.com/jiaxicheng/bigdata/blob/master/pyspark/notes/n053-window_with_gaps_using_aggregate-2-array.txt
+
+    from pyspark.sql.functions import array_sort, collect_list, struct
+
+    df = spark.createDataFrame([(1,5),(3,6),(7,10),(13,17), (15,20)],['START', 'END'])
+
+    df.agg(array_sort(collect_list(struct('START', 'END'))).alias('data'))\
+      .selectExpr("""
+        inline_outer(
+          aggregate(
+            data,
+            array((bigint(NULL) as start, bigint(NULL) as end)),
+            (acc, y) ->
+              CASE
+                WHEN element_at(acc, -1).start is NULL THEN
+                  array((y.START as start, y.END as end))
+                WHEN element_at(acc, -1).end > y.start THEN
+                  concat(acc,
+                    array((element_at(acc, -1).end as start, element_at(acc, -1).end + y.END - y.START as end))
+                  )
+                ELSE
+                  concat(acc, array((y.START as start, y.END as end)))
+              END
+          )
+        )
+        
+      """).show()
+    +-----+---+
+    |start|end|
+    +-----+---+
+    |    1|  5|
+    |    5|  8|
+    |    8| 11|
+    |   13| 17|
+    |   17| 22|
+    +-----+---+
+
+
+    
+(20) array_distinct + transform + filter + size: CountVectorizer row-wise
+  REF: https://stackoverflow.com/questions/60119554/string-indexer-countvectorizer-pyspark-on-single-row
+  ---
+    (1) find vacubulary using array_distinct (merge two arrays with concat)
+    (2) use transform to iterate through this vacubulary and use filter+size to count each item
+
+    from pyspark.sql.functions import expr
+
+    df = spark.createDataFrame([(["a", "b" ,"b", "c"], ["a","b", "x", "y"])],['column1', 'column2'])
+
+    df.withColumn('vocabulary', expr('array_distinct(concat(column1,column2))')) \
+      .withColumn('a1', expr("transform(vocabulary, x -> size(filter(column1, y -> y = x)))")) \
+      .withColumn('a2', expr("transform(vocabulary, x -> size(filter(column2, y -> y = x)))")) \
+      .show()
+    +------------+------------+---------------+---------------+---------------+
+    |     column1|     column2|     vocabulary|             a1|             a2|
+    +------------+------------+---------------+---------------+---------------+
+    |[a, b, b, c]|[a, b, x, y]|[a, b, c, x, y]|[1, 2, 1, 0, 0]|[1, 1, 0, 1, 1]|
+    +------------+------------+---------------+---------------+---------------+
+
+
