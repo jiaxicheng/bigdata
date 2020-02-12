@@ -120,3 +120,44 @@ Example-5: Timestamp functions + replace + PandasUDFType.SCALAR
     |  9|2019-12-07 03:57:09|2019-12-07 07:00:09|
     +---+-------------------+-------------------+
 
+
+
+Example-6: GROUPED_MAP: run sklearn machine-learning code per group/id independantly:
+---
+  REF: https://stackoverflow.com/questions/60112968/combining-pyspark-and-dbscan-with-pandas-udf
+  Below example to run sklearn.cluster.DBSCAN on each id: https://scikit-learn.org/stable/modules/generated/sklearn.cluster.DBSCAN.html
+
+Use pandas_udf:
+    
+    from sklearn.cluster import DBSCAN
+    from pyspark.sql.functions import pandas_udf
+    
+    data = [(1, 11.6133, 48.1075),
+             (1, 11.6142, 48.1066),
+             (1, 11.6108, 48.1061),
+             (1, 11.6207, 48.1192),
+             (1, 11.6221, 48.1223),
+             (1, 11.5969, 48.1276),
+             (2, 11.5995, 48.1258),
+             (2, 11.6127, 48.1066),
+             (2, 11.6430, 48.1275),
+             (2, 11.6368, 48.1278),
+             (2, 11.5930, 48.1156)]
+    
+    df = spark.createDataFrame(data, ["id", "X", "Y"])
+    
+    @pandas_udf("id long, X double, Y double, cluster double", PandasUDFType.GROUPED_MAP)
+    def dbscan_udf(pdf):
+        pdf['cluster'] = DBSCAN(eps=0.005, min_samples=3).fit_predict(pdf[['X', 'Y']])
+        return pdf
+    
+In another form:
+    
+    dbscan_udf = pandas_udf(
+        lambda pdf: pdf.assign(cluster=DBSCAN(eps=0.005, min_samples=3).fit_predict(pdf[['X', 'Y']])),
+        "id long, X double, Y double, cluster double", 
+        PandasUDFType.GROUPED_MAP
+    )
+    
+    df.groupby("id").apply(dbscan_udf).show()
+
