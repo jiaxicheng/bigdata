@@ -4,6 +4,13 @@ Some notes on Dataframe buitin API functions:
   + lit(): can NOT used on list, dict, use F.array, F.struct, F.create_map instead
     Note: Scala supports typedLit() which does support Seq, Map etc.
 
+    df.replace() also can not take complex data types, to replace array containing [""] to null
+    , do the following: https://stackoverflow.com/questions/59055915
+
+        df.selectExpr([ f'if({c} = array(""), null, `{c}`) AS `{c}`' for c in df.columns]).show()
+
+
+
   + split(col, ptn):  split by ' ' or '\s+' will not automatically remove leading/trailing whitespaces
     Example:
             spark.sql('select " A B\t  C  " as new').select(split('new', '\s+')).show()
@@ -60,11 +67,31 @@ Some notes on Dataframe buitin API functions:
          with which to start window intervals.
          + startTime must be less than windowDuration and greater than -windowDuration (-windowDuration, windowDuration)
 
-  + collect_list()
+  + collect_list()/collect_set()
     + NULL item is skipped from collect_list, so we use `if(col2='X',1,NULL)` as list item, when there is any col2='X'
       the size of the collect_list > 0
 
         df.withColumn('has_X', expr("size(collect_list(if(col2='X',1,NULL)) OVER (partition by col1))>0")) \
           .filter("col2 = 'X' OR !has_X").show()
 
+  + concat_ws('', ...): this also skips NULL values (similar to collect_list)
+    REF: https://stackoverflow.com/questions/60271129/select-all-non-null-column-names-per-row-in-spark
+
+    from pyspark.sql.functions import concat_ws, when, lit
+
+    df = spark.createDataFrame([
+        ('Y', None, 'Y', None),
+        (None, 'N', 'N', None),
+        ('N', 'Y', None, 'N')
+      ], list("ABCD"))
+
+    df.withColumn('new', concat_ws(', ', *[ when(df[c].isNotNull(), lit(c)) for c in df.columns])) \
+      .show()
+    +----+----+----+----+-------+
+    |   A|   B|   C|   D|    new|
+    +----+----+----+----+-------+
+    |   Y|null|   Y|null|   A, C|
+    |null|   N|   N|null|   B, C|
+    |   N|   Y|null|   N|A, B, D|
+    +----+----+----+----+-------+
 
