@@ -1,0 +1,82 @@
+Using from_json and to_json to convert an Spark ML Vector column into an ArrayType column without using UDF
+---
+(1) use to_json to convert array('vec') into StringType column, note, to_json can not directly apply to
+`pyspark.ml.linalg.VectorUDT`, must be wrapped up with one of the Complex datatype: ArrayType, StructType or MapType.
+The VectorUDT takes a StructType with 4 fields: 
+  + type: 0 for sparse and 1 for dense
+  + size: for SparseVector only
+  + indices: for SparseVector only
+  + values: 
+(2) Use from_json and the following schema to retrieve 4 fields
+
+    array<struct<type:int,size:int,indices:array<double>,values:array<double>>>
+
+(3) Create a Map between data.indices and data.values (for SparseVector where data.type = 0)
+(4) Iterate through the Sequence from 0 to data.size-1 and transform the values into Array
+    with the following SQL expression:
+    
+        IF(array_contains(data.indices, i), mapping[i], 0)
+
+Code example see below:
+    
+    from pyspark.sql.functions import from_json, to_json, array, map_from_arrays, when
+    from pyspark.ml.linalg import Vectors 
+    
+    df = spark.createDataFrame([
+        (Vectors.dense([0.01,0.98,0.0]),), 
+        (Vectors.dense([0.12,0.82,0.06]),),
+        (Vectors.sparse(3, [0,2], [0.88,0.12]),),
+        (Vectors.sparse(3, [2], [1.02]),)
+    ], ["vec"]) 
+    
+    # schema for ArrayType(VectorUDT())
+    schema = 'array<struct<type:int,size:int,indices:array<double>,values:array<double>>>'
+    
+    df1 = df.withColumn('data', from_json(to_json(array('vec')), schema)[0])
+    df1.show(truncate=False)                                                                                           
+    +---------------------+--------------------------------+
+    |vec                  |data                            |
+    +---------------------+--------------------------------+
+    |[0.01,0.98,0.0]      |[1,,, [0.01, 0.98, 0.0]]        | <-- dense
+    |[0.12,0.82,0.06]     |[1,,, [0.12, 0.82, 0.06]]       | <-- dense 
+    |(3,[0,2],[0.88,0.12])|[0, 3, [0.0, 2.0], [0.88, 0.12]]| <-- sparse
+    |(3,[2],[1.02])       |[0, 3, [2.0], [1.02]]           | <-- sparse
+    +---------------------+--------------------------------+
+    
+    df1.printSchema()                                                                                                  
+    root
+     |-- vec: vector (nullable = true)
+     |-- data: struct (nullable = true)
+     |    |-- type: integer (nullable = true)
+     |    |-- size: integer (nullable = true)
+     |    |-- indices: array (nullable = true)
+     |    |    |-- element: float (containsNull = true)
+     |    |-- values: array (nullable = true)
+     |    |    |-- element: float (containsNull = true)
+    
+    df_new = df1.withColumn('mapping', when(col('data.type') == 0,map_from_arrays('data.indices', 'data.values'))) \
+       .selectExpr("vec", """
+    
+          IF(data.type = 1
+           , data.values
+           , transform(sequence(0,data.size-1), i -> IF(array_contains(data.indices, i), mapping[i], 0))
+          ) AS arr
+    
+       """)
+    df_new.show(truncate=False)                                                                                        
+    +---------------------+------------------+
+    |vec                  |arr               |
+    +---------------------+------------------+
+    |[0.01,0.98,0.0]      |[0.01, 0.98, 0.0] |
+    |[0.12,0.82,0.06]     |[0.12, 0.82, 0.06]|
+    |(3,[0,2],[0.88,0.12])|[0.88, 0.0, 0.12] |
+    |(3,[2],[1.02])       |[0.0, 0.0, 1.02]  |
+    +---------------------+------------------+
+
+    df_new.printSchema()                                                                                               
+    root
+     |-- vec: vector (nullable = true)
+     |-- arr: array (nullable = true)
+     |    |-- element: double (containsNull = true)
+
+
