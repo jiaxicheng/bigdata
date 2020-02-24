@@ -1,25 +1,9 @@
 Using from_json and to_json to convert an Spark ML Vector column into an ArrayType column without using UDF
+
 ---
-(1) use to_json to convert array('vec') into StringType column, note, to_json can not directly apply to
-`pyspark.ml.linalg.VectorUDT`, must be wrapped up with one of the Complex datatype: ArrayType, StructType or MapType.
-The VectorUDT takes a StructType with 4 fields: 
-  + type: 0 for sparse and 1 for dense
-  + size: for SparseVector only
-  + indices: for SparseVector only
-  + values: 
-(2) Use from_json and the following schema to retrieve 4 fields
-
-    array<struct<type:int,size:int,indices:array<double>,values:array<double>>>
-
-(3) Create a Map between data.indices and data.values (for SparseVector where data.type = 0)
-(4) Iterate through the Sequence from 0 to data.size-1 and transform the values into Array
-    with the following SQL expression:
-    
-        IF(array_contains(data.indices, i), mapping[i], 0)
-
 Code example see below:
     
-    from pyspark.sql.functions import from_json, to_json, array, map_from_arrays, when
+    from pyspark.sql.functions import from_json, to_json, array
     from pyspark.ml.linalg import Vectors 
     
     df = spark.createDataFrame([
@@ -30,7 +14,7 @@ Code example see below:
     ], ["vec"]) 
     
     # schema for ArrayType(VectorUDT())
-    schema = 'array<struct<type:int,size:int,indices:array<double>,values:array<double>>>'
+    schema = 'array<struct<type:int,size:int,indices:array<int>,values:array<double>>>'
     
     df1 = df.withColumn('data', from_json(to_json(array('vec')), schema)[0])
     df1.show(truncate=False)                                                                                           
@@ -54,15 +38,17 @@ Code example see below:
      |    |-- values: array (nullable = true)
      |    |    |-- element: float (containsNull = true)
     
-    df_new = df1.withColumn('mapping', when(col('data.type') == 0,map_from_arrays('data.indices', 'data.values'))) \
-       .selectExpr("vec", """
-    
-          IF(data.type = 1
-           , data.values
-           , transform(sequence(0,data.size-1), i -> IF(array_contains(data.indices, i), mapping[i], 0))
-          ) AS arr
-    
-       """)
+    df_new = df1.selectExpr("vec", """
+       /* data.type == 1, dense vector, take data.values */
+       IF(data.type = 1
+         , data.values
+         /* otherwise, take sequence from 0 to data.size-1 and convert it into
+           array with i from data.indices and corresponding value in data.values
+           using array_position(1-based)
+         */
+         , transform(sequence(0,data.size-1), i -> IFNULL(data.values[int(array_position(data.indices, i))-1],0)) 
+       ) as arr
+    """)
     df_new.show(truncate=False)                                                                                        
     +---------------------+------------------+
     |vec                  |arr               |
@@ -79,4 +65,55 @@ Code example see below:
      |-- arr: array (nullable = true)
      |    |-- element: double (containsNull = true)
 
+
+**WHERE:**
+
+(1) use `to_json` to convert array('vec') into StringType column, note, to_json can not be directly apply to
+`pyspark.ml.linalg.VectorUDT`, argument must be one of the Complex datatype: ArrayType, StructType or MapType.
+
+(2) The VectorUDT takes a StructType with 4 fields: 
+  + type: 0 for Sparse Vector and 1 for Dense Vector
+  + size: for SparseVector only
+  + indices: for SparseVector only, array of indices for items with non-zero values
+  + values: all values for Dense Vector, non-zero values for Sparse Vector
+
+(3) Use from_json and the following schema to retrieve the 4 fields mentioned above:
+
+    array<struct<type:int,size:int,indices:array<int>,values:array<double>>>
+
+(4) For Dense Vector where type == 1, take the values array directly
+
+(5) For Sparse Vector, create a sequence from `0` to `size-1`, iterate through this list by `i`
+    use `array_position(indices, i)` to find the index of `i` in `indices` array (return 0 if not exist)
+    and retrieve the corresponding value at the same index in `values` array.
+    (notice array_position is 1-based index, while Array reference is 0-based). 
+
+        IFNULL(values[array_position(indices,i) - 1], 0)
+
+    for i not in indices, `values[array_position(indices,i) - 1]` becomes values[-1] which is always NULL
+
+
+**Notes:**
+
+(1) if the column contains only Dense Vector, then it can be simplified using from_json
+
+    df = spark.createDataFrame([
+        (Vectors.dense([0.01,0.98,0.0]),), 
+        (Vectors.dense([0.12,0.82,0.06]),)
+    ], ["vec"]) 
+
+    df_new = df.selectExpr("vec", "from_json(string(vec), 'array<double>') as arr")
+    #DataFrame[vec: vector, arr: array<double>]
+
+    df_new.show()
+    +----------------+------------------+
+    |vec             |arr               |
+    +----------------+------------------+
+    |[0.01,0.98,0.0] |[0.01, 0.98, 0.0] |
+    |[0.12,0.82,0.06]|[0.12, 0.82, 0.06]|
+    +----------------+------------------+
+
+(2) With Spark 3.0+, use pyspark.ml.functions.vector_to_array
+
+   see ref: https://stackoverflow.com/questions/38384347/how-to-split-vector-into-columns-using-pyspark
 
