@@ -213,8 +213,12 @@ spark.sql.DataFrame:
     dropna(how='any', thresh=None, subset=None)
   + fillna(value, subset=None)
   + replace(to_replace, value=<>, subset=None): 
-    * Note: value and to_replace must have the same type, only available to numerics, booleans or strings
-            to_replace and value can be list, to_replace can be a dict when value is missing.
+    * Note: 
+      (1) value and to_replace must have the same type, only available to numerics, booleans or strings
+          to_replace and value can be list, to_replace can be a dict when value is missing.
+      (2) df.replace() will fail if any field names contain 'dot', 
+         AnalysisException: 'Cannot resolve column name "results.storiesCount" among (results.storiesCount, ...);
+
   + describe(): 
       compute basic stat for numeric and string columns
     summary(): 
@@ -277,10 +281,14 @@ spark.sql.DataFrame:
        + df.replace(), df.fillna(), the replacement part can be a bool, int, long, float, string or None. complex
          data types (array, map, struct) are not supported.
        + df.fillna(0) changes only numeric columns, df.fillna('nn') only changes string columns
+       + df.summary('count') will skip `None` values, but not 'NaN' (for example: float("nan")), NaN will be
+         counted in the df.summary
    (3) create an empty RDD and empty DataFrame
 
           rdd_empty = spark.sparkContext.emptyRDD()
           df_empty  = spark.createDataFrame(rdd_empty, schema='')
+
+          spark.range(0).drop("id")
 
    (4) df.freqItems(['col1'], 0.5) return an array of the freqItems from 'col1', the items in the array
        are unsorted, dont expect the first item to be the most counted item
@@ -465,6 +473,7 @@ spark.read
       note: default is line mode.
       + wholetext: if true, read each file as a single Row
       + lineSep: default '\r?\n'
+        Note: this can be used to replace sc.newAPIHadoopFile + textinputformat.record.delimiter
   + format with plugins:
     + avro: since spark 2.4+, SparkSQL provides builtin support for reading/writing Apache Avro data
       + pyspark --packages org.apache.spark:spark-avro_2.11:2.4.0
@@ -586,7 +595,9 @@ spark.write
             .enableHiveSupport() \
             .getOrCreate()
         df1.write.format('parquet').mode('overwrite').saveAsTable('tbl_df1')
-
+  (5) bulk-insersion options:
+      df.coalesce(5).write.format('...').option("batchsize", "200000")
+     + set partition numbers + batchsize
 
 
 pyspark.sql.UDFRegistration
@@ -651,7 +662,7 @@ pyspark.sql.types:
   (2) common to MapType(), ArrayType(), StructField() and StructType()
       + fromJson()    <-- classmethod
 
-  (3) Mapping Python types from/to Spark SQL DataType
+  (3) Mapping Python types from/to pyspark.sql.types DataType
       Reference: https://spark.apache.org/docs/2.4.4/api/python/_modules/pyspark/sql/types.html
 
       _type_mappings = {
@@ -691,6 +702,28 @@ pyspark.sql.types:
           <=32: (IntegerType, int)
           <=64: (LongType, long)
       }
+
+    # DataType mapping between pyspark.sql.types and Spark SQL:
+    +-------------------+-----------+---------------------------+
+    | pyspark.sql.types | SparkSQL  |           Notes           |
+    +-------------------+-----------+---------------------------+
+    | ByteType          | tinyiny   | signed single-bit integer |
+    | ShortType         | smallint  | signed 16-bit integer     |
+    | IntegerType       | int       | signed 32-bit integer     |
+    | LongType          | bigint    | signed 64-bit integer     |
+    | FloatType         | float     | single precision floats   |
+    | DoubleType        | double    | double precision floats   |
+    | DecimalType       | decimal   | fixed precision           |
+    | StringType        | string    | -                         |
+    | BinaryType        | binary    | -                         |
+    | BooleanType       | boolean   | -                         |
+    | DateType          | date      | -                         |
+    | TimestampType     | timestamp | -                         |
+    | ArrayType         | array     | -                         |
+    | StructType        | struct    | -                         |
+    | MapType           | map       | -                         |
+    +-------------------+-----------+---------------------------+
+
 
    (4) BinaryType() is byteArray, you can access it through substr(barr,1,1), not `barr[0]`
        , the result of `substr(barr,1,1)` is still a BinaryType(), not ByteType()
