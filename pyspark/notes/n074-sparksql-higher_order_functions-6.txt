@@ -103,7 +103,7 @@ Spark SQL higher-order functions:
     |5        |[1 -> 5, 2 -> 3, 3 -> 3, 4 -> 1]|
     +---------+--------------------------------+
 
-  Notes: this can also be handled using map_from_arrays:
+  Method-2: using map_from_arrays:
 
     from pyspark.sql.functions import collect_list, flatten, array_distinct, expr
 
@@ -122,6 +122,33 @@ Spark SQL higher-order functions:
     |5        |[1 -> 5, 2 -> 3, 3 -> 3, 4 -> 1]|
     +---------+--------------------------------+
 
+  Method-3: With Spark 3.0+, use aggregate + transform_values:
+
+    from pyspark.sql.functions import collect_list, flatten
+
+    df.withColumn("all_vals", flatten(collect_list("vars").over(w1))) \
+      .selectExpr("timestamp", """
+        aggregate(
+          all_vals, 
+          /* EMPTY map as zero values */
+          map(), 
+          /* merge: if y not in acc, add map(y,1), else adjust acc[y] += 1 using transform_values */
+          (acc, y) -> 
+            IF(acc[y] is NULL
+             , map_concat(acc, map(y,1))
+             , transform_values(acc, (k,v) -> int(IF(k=y,v+1,v)))
+            )
+        ) as new_vals 
+    """).show(truncate=False)
+    +---------+--------------------------------+
+    |timestamp|new_vals                        |
+    +---------+--------------------------------+
+    |1        |[1 -> 1, 2 -> 1, 3 -> 1]        |
+    |2        |[1 -> 2, 2 -> 2, 3 -> 1, 4 -> 1]|
+    |3        |[1 -> 3, 2 -> 3, 3 -> 1, 4 -> 1]|
+    |4        |[1 -> 4, 2 -> 3, 3 -> 2, 4 -> 1]|
+    |5        |[1 -> 5, 2 -> 3, 3 -> 3, 4 -> 1]|
+    +---------+--------------------------------+
 
 
 
