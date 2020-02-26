@@ -64,3 +64,65 @@ Spark SQL higher-order functions:
     +------------+------------+---------------+---------------+---------------+
 
 
+
+(21) using aggregate with MapType columns
+  REF: https://stackoverflow.com/questions/60405497/calculate-rolling-sum-of-array-in-pyspark-and-save-as-dict
+  ---
+  (1) use array_distinct to find all distinct keys in array column
+  (2) use transform to convert array item into a MapType with a single key
+  (3) use aggregate and map_concat to conver array of maps into a map:
+  
+      aggregate(arr_of_maps, map(), (acc, y) -> map_concat(acc, y))
+
+  Python Code:
+
+    from pyspark.sql import Window
+    from pyspark.sql.functions import collect_list, flatten
+
+    df = spark.createDataFrame([(2,[1,2,3]), (2,[1,2,4]), (3,[1,2]), (4,[1,3]), (5,[1,3])],['timestamp', 'vars'])
+
+    w1 = Window.partitionBy().orderBy('timestamp')
+
+    df.withColumn("all_vals", flatten(collect_list("vars").over(w1))) \
+      .selectExpr("timestamp", """
+        aggregate(
+          transform(
+            array_distinct(all_vals), x -> map(x, size(filter(all_vals, y -> y = x)))
+          ), 
+          map(), 
+          (acc, y) -> map_concat(acc, y)
+        ) as new_vars
+    """).show(truncate=False) 
+    +---------+--------------------------------+
+    |timestamp|new_vars                        |
+    +---------+--------------------------------+
+    |1        |[1 -> 1, 2 -> 1, 3 -> 1]        |
+    |2        |[1 -> 2, 2 -> 2, 3 -> 1, 4 -> 1]|
+    |3        |[1 -> 3, 2 -> 3, 3 -> 1, 4 -> 1]|
+    |4        |[1 -> 4, 2 -> 3, 3 -> 2, 4 -> 1]|
+    |5        |[1 -> 5, 2 -> 3, 3 -> 3, 4 -> 1]|
+    +---------+--------------------------------+
+
+  Notes: this can also be handled using map_from_arrays:
+
+    from pyspark.sql.functions import collect_list, flatten, array_distinct, expr
+
+    df.withColumn("all_vals", flatten(collect_list("vars").over(w1))) \
+      .withColumn("all_keys", array_distinct("all_vals")) \
+      .withColumn("all_values", expr("transform(all_keys, x -> size(filter(all_vals, y -> y = x)))")) \
+      .selectExpr("timestamp", "map_from_arrays(all_keys, all_values) as new_vals") \
+      .show(truncate=False)
+    +---------+--------------------------------+
+    |timestamp|new_vals                        |
+    +---------+--------------------------------+
+    |1        |[1 -> 1, 2 -> 1, 3 -> 1]        |
+    |2        |[1 -> 2, 2 -> 2, 3 -> 1, 4 -> 1]|
+    |3        |[1 -> 3, 2 -> 3, 3 -> 1, 4 -> 1]|
+    |4        |[1 -> 4, 2 -> 3, 3 -> 2, 4 -> 1]|
+    |5        |[1 -> 5, 2 -> 3, 3 -> 3, 4 -> 1]|
+    +---------+--------------------------------+
+
+
+
+
+
