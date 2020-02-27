@@ -10,14 +10,18 @@ use Summarizer.metrics("mean", "count", "normL1", "max") to check more than one 
  
 Example code:
 
+Notice: `normL1` calculates the sum of absolute values:
+
     from pyspark.ml.linalg import SparseVector
     from pyspark.ml.stat import Summarizer 
     
     df = spark.createDataFrame([
-        (SparseVector(11,[1,2,3],[1.0,0.2,0.4]),1),
-        (SparseVector(11,[1,2],[0.3,0.2]),1),
-        (SparseVector(11,[1,3,4],[0.5,0.3,0.2]),1)
-    ], ['features_array', 'id']) 
+        (SparseVector(11,[1,2,3],[1.0,0.2,0.4]),1,1),
+        (SparseVector(11,[1,2],[0.3,0.2]),1,2),
+        (SparseVector(11,[1,3,4],[0.5,0.3,0.2]),1,3),
+        (SparseVector(13,[0,3,9],[1.0,0.2,0.4]),2,1),
+        (SparseVector(13,[1,8],[0.3,0.2]),2,2)
+    ], ['features_array', 'id', 'timestamp']) 
     
     summary = df.select(Summarizer.normL1(df.features_array).alias('value')).first().value
     #DenseVector([0.0, 1.8, 0.4, 0.7, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -29,8 +33,35 @@ To convert DenseVector into SparseVector
     t = summary.toArray()
     t_nonzero = t!=0
     summary_sparse = SparseVector(t.size, np.where(t_nonzero)[0], t[t_nonzero])
-    
-Need to groupBy id and then calculate normL1 sum on each id:
+   
+Or groupby and summary:
+
+    df.groupby('id').agg(Summarizer.normL1(df.features_array).alias('value')).show(truncate=False)
+    +---+---------------------------------------------+
+    |id |value                                        |
+    +---+---------------------------------------------+
+    |1  |[0.0,1.8,0.4,0.7,0.2,0.0,0.0,0.0,0.0,0.0,0.0]|
+    +---+---------------------------------------------+
+
+Using Window function to calculate cumulative sum:
+
+    from pyspark.sql import Window
+
+    w1 = Window.partitionBy('id').orderBy('timestamp')
+    summarizer = Summarizer.metrics("normL1")
+    df.withColumn('t1', summarizer.summary(df.features_array).over(w1).normL1).show(truncate=False)
+    +--------------------------+---+---------+-----------------------------------------------------+
+    |features_array            |id |timestamp|t1                                                   |
+    +--------------------------+---+---------+-----------------------------------------------------+
+    |(11,[1,2,3],[1.0,0.2,0.4])|1  |1        |[0.0,1.0,0.2,0.4,0.0,0.0,0.0,0.0,0.0,0.0,0.0]        |
+    |(11,[1,2],[0.3,0.2])      |1  |2        |[0.0,1.3,0.4,0.4,0.0,0.0,0.0,0.0,0.0,0.0,0.0]        |
+    |(11,[1,3,4],[0.5,0.3,0.2])|1  |3        |[0.0,1.8,0.4,0.7,0.2,0.0,0.0,0.0,0.0,0.0,0.0]        |
+    |(13,[0,3,9],[1.0,0.2,0.4])|2  |1        |[1.0,0.0,0.0,0.2,0.0,0.0,0.0,0.0,0.0,0.4,0.0,0.0,0.0]|
+    |(13,[1,8],[0.3,0.2])      |2  |2        |[1.0,0.3,0.0,0.2,0.0,0.0,0.0,0.0,0.2,0.4,0.0,0.0,0.0]|
+    +--------------------------+---+---------+-----------------------------------------------------+
+
+
+Another way to convert SparseVector into Array and then use API functions:
 ---
 Step-1: convert SparseVector into array of doubles
     
@@ -38,44 +69,78 @@ Step-1: convert SparseVector into array of doubles
     schema = "array<struct<type:int,size:int,indices:array<int>,values:array<double>>>"
     df1 = df.withColumn("features_array", from_json(to_json(array("features_array")), schema)[0])
     
-    df2 = df1.selectExpr("id", """
-        transform(
-          sequence(0, features_array.size-1), 
-          i -> 
-          IF(array_contains(features_array.indices, i)
-           , features_array.values[array_position(features_array.indices,i)-1]
-           , 0
-          ) 
-        ) AS features_array
+    df2 = df1.selectExpr("id", "timestamp", """
+      IF(/* if type = 1, DenseVector, take values array directly */
+         features_array.type = 1
+       , features_array.values
+         /* else use transform to convert SparseVector to array */
+       , transform(
+           sequence(0, features_array.size-1), 
+           i -> 
+           IF(array_contains(features_array.indices, i)
+            , features_array.values[array_position(features_array.indices,i)-1]
+            , 0
+           ) 
+         )
+       ) AS features_array
       """)
     
     df2.show(truncate=False)
-    +---+-------------------------------------------------------+
-    |id |features_array                                         |
-    +---+-------------------------------------------------------+
-    |1  |[0.0, 1.0, 0.2, 0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]|
-    |1  |[0.0, 0.3, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]|
-    |1  |[0.0, 0.5, 0.0, 0.3, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]|
-    +---+-------------------------------------------------------+
-    
+    +---+---------+-----------------------------------------------------------------+
+    |id |timestamp|features_array                                                   |
+    +---+---------+-----------------------------------------------------------------+
+    |1  |1        |[0.0, 1.0, 0.2, 0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]          |
+    |1  |2        |[0.0, 0.3, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]          |
+    |1  |3        |[0.0, 0.5, 0.0, 0.3, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]          |
+    |2  |1        |[1.0, 0.0, 0.0, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4, 0.0, 0.0, 0.0]|
+    |2  |2        |[0.0, 0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.2, 0.0, 0.0, 0.0, 0.0]|
+    +---+---------+-----------------------------------------------------------------+
+
+    df2
+    #DataFrame[id: bigint, timestamp: bigint, features_array: array<double>]
+
 Step-2: calculate summary 
 
   Method-1: using aggregate
 
-    df2.groupby('id').agg(expr("""
+    sql_expr1 = """
         aggregate(
           collect_list(features_array), 
           cast(array() as array<double>), 
           (acc,y) -> 
             zip_with(acc, y, (t1,t2) -> ifnull(t1,0)+ifnull(t2,0))
         ) as summary
-      """)
-    ).show(truncate=False)
-    +---+-------------------------------------------------------+
-    |id |summary                                                |
-    +---+-------------------------------------------------------+
-    |1  |[0.0, 1.8, 0.4, 0.7, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]|
-    +---+-------------------------------------------------------+
+    """
+
+    df2.groupby('id').agg(expr(sql_expr1)).show(truncate=False)
+    +---+-----------------------------------------------------------------+
+    |id |summary                                                          |
+    +---+-----------------------------------------------------------------+
+    |1  |[0.0, 1.8, 0.4, 0.7, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]          |
+    |2  |[1.0, 0.3, 0.0, 0.2, 0.0, 0.0, 0.0, 0.0, 0.2, 0.4, 0.0, 0.0, 0.0]|
+    +---+-----------------------------------------------------------------+
+
+  For cumulative/incremental sum:
+    sql_expr2 = """
+        aggregate(
+          collect_list(features_array) OVER (Partition by id ORDER by timestamp), 
+          cast(array() as array<double>), 
+          (acc,y) -> 
+            zip_with(acc, y, (t1,t2) -> ifnull(t1,0)+ifnull(t2,0))
+        ) as summary
+    """
+
+    df2.selectExpr('id', 'timestamp', sql_expr2).show(truncate=False)                                                  
+    +---+---------+-----------------------------------------------------------------+
+    |id |timestamp|summary                                                          |
+    +---+---------+-----------------------------------------------------------------+
+    |1  |1        |[0.0, 1.0, 0.2, 0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]          |
+    |1  |2        |[0.0, 1.3, 0.4, 0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]          |
+    |1  |3        |[0.0, 1.8, 0.4, 0.7, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]          |
+    |2  |1        |[1.0, 0.0, 0.0, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4, 0.0, 0.0, 0.0]|
+    |2  |2        |[1.0, 0.3, 0.0, 0.2, 0.0, 0.0, 0.0, 0.0, 0.2, 0.4, 0.0, 0.0, 0.0]|
+    +---+---------+-----------------------------------------------------------------+
+
     
   Method-2: using pandas_udf:
 
@@ -84,12 +149,32 @@ Step-2: calculate summary
     
     @pandas_udf("id:int,features_array:array<double>", PandasUDFType.GROUPED_MAP)
     def col_summary(key, pdf):
-       return pd.DataFrame([key + (np.array(pdf.features_array.tolist()).sum(0),)])
+      return pd.DataFrame([key + (np.array(pdf.features_array.tolist()).sum(0),)])
     
     df2.groupby('id').apply(col_summary).show(truncate=False)                                                          
-    +---+-------------------------------------------------------+                   
-    |id |features_array                                         |
-    +---+-------------------------------------------------------+
-    |1  |[0.0, 1.8, 0.4, 0.7, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]|
-    +---+-------------------------------------------------------+
+    +---+-----------------------------------------------------------------+         
+    |id |features_array                                                   |
+    +---+-----------------------------------------------------------------+
+    |1  |[0.0, 1.8, 0.4, 0.7, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]          |
+    |2  |[1.0, 0.3, 0.0, 0.2, 0.0, 0.0, 0.0, 0.0, 0.2, 0.4, 0.0, 0.0, 0.0]|
+    +---+-----------------------------------------------------------------+
+
+  Pandas UDF only support ubounded Window, thus can not calculate incremental sum:
+    
+    w1 = Window.partitionBy('id')
+    @pandas_udf("array<double>", PandasUDFType.GROUPED_AGG)
+    def col_sum(arr): 
+      return np.array(arr.tolist()).sum(0)
+    df2.select('id', 'timestamp', col_sum('features_array').over(w1).alias('t')).show(truncate=False)                  
+    +---+---------+-----------------------------------------------------------------+
+    |id |timestamp|t                                                                |
+    +---+---------+-----------------------------------------------------------------+
+    |1  |1        |[0.0, 1.8, 0.4, 0.7, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]          |
+    |1  |2        |[0.0, 1.8, 0.4, 0.7, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]          |
+    |1  |3        |[0.0, 1.8, 0.4, 0.7, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]          |
+    |2  |1        |[1.0, 0.3, 0.0, 0.2, 0.0, 0.0, 0.0, 0.0, 0.2, 0.4, 0.0, 0.0, 0.0]|
+    |2  |2        |[1.0, 0.3, 0.0, 0.2, 0.0, 0.0, 0.0, 0.0, 0.2, 0.4, 0.0, 0.0, 0.0]|
+    +---+---------+-----------------------------------------------------------------+
+
+
     
