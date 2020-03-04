@@ -1,0 +1,52 @@
+Continue..
+
+Spark SQL higher-order functions:
+
+(22) Count array items using transform + filter(size) or aggregate functions:
+  REF: https://stackoverflow.com/questions/60517738/alternative-to-groupby-for-pyspark-dataframe
+
+  Below example
+  Method-1: using transform + filter
+  1. we use array_max to find max_value in list and generate a sequence from 0 to this max value
+  2. iterate the above list using `x` and transform it into the number of items in array `data` using(filter+size)
+    
+    df = spark.createDataFrame([(2,[1,2]), (2,[1,2]), (3,[1,2,3]), (3,[1,2])],['timestamp', 'vars'])
+    
+    from pyspark.sql.functions import flatten, collect_list
+    
+    df.groupby('timestamp').agg(flatten(collect_list('vars')).alias('data')) \
+      .selectExpr("timestamp", "transform(sequence(0, array_max(data)), x -> size(filter(data, y -> y = x)))") \
+      .show(truncate=False)
+    +---------+------------+                                                        
+    |timestamp|vars        |
+    +---------+------------+
+    |3        |[0, 2, 2, 1]|
+    |2        |[0, 2, 2]   |
+    +---------+------------+
+    
+  Method-2: using aggregate function:
+  1. find max_value in list and set zero_value of `acc` as an Array with `max_value+1` items with all zero values
+  2. iterate through the Array `data` using `y` and reduce the array `acc` by its index `i` and value `x` based 
+     on the value of `y` using `transform(acc, (x,i) -> IF(i=y, x+1, x))`
+  see below:
+    
+    df.groupby('timestamp').agg(flatten(collect_list('vars')).alias('data')) \ 
+       .selectExpr("timestamp", """ 
+        
+         aggregate( 
+           data, 
+           /* use an array as zero_value, size = array_max(data))+1 and all values are zero */
+           array_repeat(0, int(array_max(data))+1), 
+           /* increment the ith value of the Array by 1 if i == y */
+           (acc, y) -> transform(acc, (x,i) -> IF(i=y, x+1, x)) 
+         ) as vars 
+                                      
+    """).show(truncate=False)
+    +---------+------------+                                                        
+    |timestamp|vars        |
+    +---------+------------+
+    |3        |[0, 2, 2, 1]|
+    |2        |[0, 2, 2]   |
+    +---------+------------+
+    
+    
