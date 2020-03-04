@@ -113,7 +113,36 @@ Code example see below:
     |[0.12,0.82,0.06]|[0.12, 0.82, 0.06]|
     +----------------+------------------+
 
-(2) With Spark 3.0+, use pyspark.ml.functions.vector_to_array
+(2) With Spark 3.0+, use pyspark.ml.functions.vector_to_array    <-- Need more info
 
-   see ref: https://stackoverflow.com/questions/38384347/how-to-split-vector-into-columns-using-pyspark
+   see ref: SPARK-30762  https://issues.apache.org/jira/browse/SPARK-30762
+            https://github.com/apache/spark/blob/master/python/pyspark/ml/functions.py
+            https://github.com/apache/spark/blob/master/mllib/src/main/scala/org/apache/spark/ml/functions.scala
+   other link: https://stackoverflow.com/questions/38384347/how-to-split-vector-into-columns-using-pyspark
+
+   Notice this function is not available with 3.0-preview-2 and before
+
+##############
+Another Example: https://stackoverflow.com/questions/60431464/how-to-get-item-from-vector-struct-in-pyspark
+
+  Below example retrieve values only from the SparseVectors.
+
+    from pyspark.ml.linalg import SparseVector
+    from pyspark.sql.functions import array, to_json, from_json
+    
+    df = spark.createDataFrame([
+      (list("abc"),SparseVector(4527,[0,1,31],[0.6363067860791387,1.0888040725098247,4.371858972705023])),
+      (['a'], SparseVector(4527,[8],[2.729945780576634])
+    ],['words', 'features'])
+    
+    # only values field is needed: 
+    schema = "array<struct<values:array<double>>>"
+    
+    df.withColumn('features', from_json(to_json(array('features')), schema)[0].values).show(truncate=False)
+    +---------+-----------------------------------------------------------+
+    |words    |features                                                   |
+    +---------+-----------------------------------------------------------+
+    |[a, b, c]|[0.6363067860791387, 1.0888040725098247, 4.371858972705023]|
+    |[a]      |[2.729945780576634]                                        |
+    +---------+-----------------------------------------------------------+
 
