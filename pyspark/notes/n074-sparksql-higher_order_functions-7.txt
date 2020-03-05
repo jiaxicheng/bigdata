@@ -49,4 +49,28 @@ Spark SQL higher-order functions:
     |2        |[0, 2, 2]   |
     +---------+------------+
     
-    
+
+  Method-3: using explode + groupby + count and split data into two arrays: `indices` and `values`
+    then use transform and array_position to fill in the final array:
+
+    df.selectExpr("timestamp", "explode(vars) as var") \
+        .groupby('timestamp','var') \
+        .count() \
+        .groupby("timestamp") \
+        .agg(collect_list(struct("var","count")).alias("data")) \
+        .selectExpr(
+            "timestamp",
+            "transform(data, x -> x.var) as indices",
+            "transform(data, x -> x.count) as values"
+        ).selectExpr(
+            "timestamp",
+            "transform(sequence(0, array_max(indices)), i -> IFNULL(values[array_position(indices,i)-1],0)) as new_vars"
+        ).show(truncate=False)
+    +---------+------------+                                                        
+    |timestamp|new_vars    |
+    +---------+------------+
+    |3        |[0, 2, 2, 1]|
+    |2        |[0, 2, 2]   |
+    +---------+------------+
+
+        
