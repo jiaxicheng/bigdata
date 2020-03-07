@@ -53,6 +53,8 @@ Spark SQL higher-order functions:
   Method-3: using explode + groupby + count and split data into two arrays: `indices` and `values`
     then use transform and array_position to fill in the final array:
 
+    from pyspark.sql.functions import collect_list, struct
+
     df.selectExpr("timestamp", "explode(vars) as var") \
         .groupby('timestamp','var') \
         .count() \
@@ -73,4 +75,29 @@ Spark SQL higher-order functions:
     |2        |[0, 2, 2]   |
     +---------+------------+
 
-        
+
+  Method-4 using pyspark.ml.feature.CountVectorizer
+
+    from pyspark.ml.feature import CountVectorizerModel
+    from pyspark.sql.functions import collect_list, flatten
+
+    # find max N of array vars from all rows 
+    N = df.selectExpr('max(array_max(vars)) as m').first().m
+
+    # create models based on the list from range(N) (convert IntegerType to StringType)
+    model = CountVectorizerModel.from_vocabulary([*map(str,range(N+1))], inputCol="vars", outputCol="vec_vars")
+
+    # convert array of ints to array of strings, groupby and create a flattened list for each timestamp
+    df1 = df.withColumn('vars', df.vars.astype("array<string>")) \
+        .groupby('timestamp') \
+        .agg(flatten(collect_list("vars")).alias("vars"))
+
+    # use the model to create the resulting SparseVector, then convert it into ArrayType column (udf)
+    model.transform(df1).withColumn("new_vars", to_array("vec_vars")).show(truncate=False)                             
+    +---------+---------------+-------------------------+--------------------+      
+    |timestamp|vars           |vec_vars                 |new_vars            |
+    +---------+---------------+-------------------------+--------------------+
+    |3        |[1, 2, 3, 1, 2]|(4,[1,2,3],[2.0,2.0,1.0])|[0.0, 2.0, 2.0, 1.0]|
+    |2        |[1, 2, 1, 2]   |(4,[1,2],[2.0,2.0])      |[0.0, 2.0, 2.0, 0.0]|
+    +---------+---------------+-------------------------+--------------------+
+   
