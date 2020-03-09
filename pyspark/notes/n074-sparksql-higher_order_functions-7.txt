@@ -101,3 +101,45 @@ Spark SQL higher-order functions:
     |2        |[1, 2, 1, 2]   |(4,[1,2],[2.0,2.0])      |[0.0, 2.0, 2.0, 0.0]|
     +---------+---------------+-------------------------+--------------------+
    
+
+
+(23) Use transform to split a Array list into chunk and take the sum of each chunk for a new list:
+    REF:https://stackoverflow.com/questions/60537729/how-to-split-an-array-into-chunks-and-find-the-sum-of-the-chunks-and-store-the-o
+
+    from pyspark.sql.functions import expr
+
+    df = spark.createDataFrame([
+      (1, [0, 2, 0, 3, 1, 4, 2, 7]),
+      (2, [0, 4, 4, 3, 4, 2, 2, 5])
+    ], ["Index", "finalArray"])
+
+    N = 3
+
+    sql_expr = """
+        transform(
+          /* create a sequence from 0 to number_of_chunks-1 */
+          sequence(0,ceil(size(finalArray)/{0})-1),
+          /* iterate the above sequence */
+          i ->
+            /* create a sequence from 0 to chunk_size-1
+               calculate the sum of values containing every chunk_size items
+            */
+            aggregate(
+              sequence(0,{0}-1),
+              0L,
+              (acc, y) -> acc + ifnull(finalArray[i*{0}+y],0)
+            )
+        )
+    """
+
+    df.withColumn('new_vars', expr(sql_expr.format(N))).show(truncate=False)                                           
+    +-----+------------------------+---------+
+    |Index|finalArray              |new_vars |
+    +-----+------------------------+---------+
+    |1    |[0, 2, 0, 3, 1, 4, 2, 7]|[2, 8, 9]|
+    |2    |[0, 4, 4, 3, 4, 2, 2, 5]|[8, 9, 7]|
+    +-----+------------------------+---------+
+
+
+    
+
