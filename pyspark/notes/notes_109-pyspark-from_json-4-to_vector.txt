@@ -1,0 +1,88 @@
+
+https://stackoverflow.com/questions/60450358/transfor-spark-string-column-to-vectorudt
+
+Vector can be constructed using JSON string, using the internal _sqlType of VectorUDT, see below:
+https://github.com/apache/spark/blob/master/mllib/src/main/scala/org/apache/spark/ml/linalg/VectorUDT.scala
+
+    struct<type:tinyint,size:int,indices:array<int>,values:array<double>>
+
+So you can do the following:
+(1) remove the parenthesis from the String field `substr(col,2,length(col)-2)`
+(2) split the above string with regex pattern `,\s*(?=\[)` into an array named `s` with three items 
+    which corresponding to s[0]==size, s[1]==indices and s[2]==values
+(3) use `concat` to create a JSON array of a single dictionary
+
+    [{"type":0,"size":s[0],"indices":s[1],"values":s[2]}]
+(4) use from_json and schema `ArrayType(VectorUDT())` to convert the above string into an array of a single Vector
+    and take the first item using `[0]`
+
+Note: from_json and to_json works only on complex DataTypes(map, array or struct), thus we wrap the VectorUDT() 
+with ArrayType(), this can also be StructType or MapType.
+
+    from pyspark.ml.linalg import VectorUDT
+    from pyspark.sql.types import ArrayType
+
+    from pyspark.sql.functions import expr, from_json
+
+    df = spark.createDataFrame([('(174, [7, 10, 56, 89, 156], [1.0, 1.0, 1.0, 1.0, 1.0])',)],['col'])
+    # DataFrame[col: string]
+
+    df_new = df.withColumn('s', expr("split(substr(col,2,length(col)-2), ',\\\\s*(?=\\\\[)')")) \
+      .selectExpr("""
+          concat(
+            '[{"type":0,"size":',
+            s[0],
+            ',"indices":',
+            s[1],
+            ',"values":',
+            s[2],
+            '}]' 
+          ) as vec_json
+       """) \
+      .withColumn('features', from_json('vec_json', ArrayType(VectorUDT()))[0])
+
+    df_new.printSchema()
+    root
+     |-- vec_json: string (nullable = true)
+     |-- features: vector (nullable = true)
+
+    df_new.show(truncate=False, vertical=True)  
+    -RECORD 0---------------------------------------------------------------------------------------------
+     vec_json | [{"type":0,"size":174,"indices":[7, 10, 56, 89, 156],"values":[1.0, 1.0, 1.0, 1.0, 1.0]}] 
+     features | (174,[7,10,56,89,156],[1.0,1.0,1.0,1.0,1.0])
+
+
+A more general way for StringType column mixed with strings from Sparse and Dense vectors:
+---
++ use translate to remove parenthesis (might be slower than substr)
++ after split, if number of items is 1, then DenseVector(type=1), else SparseVector(type=0)
+
+
+    df = spark.createDataFrame([
+        (e,) for e in ['[0.01,0.98,0.0]','[0.12,0.82,0.06]','(3, [0,2], [0.88,0.12])','(3, [2], [1.02])']
+    ], ['col'])
+    #DataFrame[col: string]
+    
+    df_new = df.withColumn('s', expr("split(translate(col,'()',''), ',\\\\s*(?=\\\\[)')")) \
+        .selectExpr("""
+          IF(size(s)=1
+           , '[{"type":1,"values":' || s[0] || '}]'
+           , '[{"type":0,"size":' || s[0] || ',"indices":' || s[1] || ',"values":' || s[2] || '}]'
+          ) AS vec_json
+        """).withColumn('features', from_json('vec_json', ArrayType(VectorUDT()))[0])
+
+    df_new.show(truncate=False)                                                                                        
+    +----------------------------------------------------------+---------------------+
+    |vec_json                                                  |features             |
+    +----------------------------------------------------------+---------------------+
+    |[{"type":1,"values":[0.01,0.98,0.0]}]                     |[0.01,0.98,0.0]      |
+    |[{"type":1,"values":[0.12,0.82,0.06]}]                    |[0.12,0.82,0.06]     |
+    |[{"type":0,"size":3,"indices":[0,2],"values":[0.88,0.12]}]|(3,[0,2],[0.88,0.12])|
+    |[{"type":0,"size":3,"indices":[2],"values":[1.02]}]       |(3,[2],[1.02])       |
+    +----------------------------------------------------------+---------------------+
+
+    df_new.printSchema()
+    root
+     |-- vec_json: string (nullable = true)
+     |-- features: vector (nullable = true)
+
