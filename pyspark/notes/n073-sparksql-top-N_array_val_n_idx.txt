@@ -1,0 +1,31 @@
+https://stackoverflow.com/questions/60759999/how-to-get-k-largest-element-and-index-in-pyspark-dataframe-array
+
+Take the top-2 probability and their array indices from an ArrayType column
+    
+for spark 2.4+, use transform to convert array of doubles into array of structs containing value and index of each item in the original array, sort the array(by descending), and then take the first N:
+    
+    from pyspark.sql.functions import expr
+    
+    df = spark.createDataFrame([(e,) for e in [
+      [0.27047928569511825,0.5312608102025099,0.19825990410237174],
+      [0.06711381377029987,0.8775456658890036,0.05534052034069637],
+      [0.10847074295048188,0.04602848157663474,0.8455007754728833]
+    ]], ['probability'])
+    
+    df.withColumn('d', expr('slice(sort_array(transform(probability, (x,i) -> (x as val, i as idx)), False),1,2)')) \
+      .selectExpr(
+        'probability', 
+        'd[0].val as largest_1', 
+        'd[0].idx as index_1', 
+        'd[1].val as largest_2', 
+        'd[1].idx as index_2'
+    ).show()
+    +--------------------+------------------+-------+-------------------+-------+
+    |         probability|         largest_1|index_1|          largest_2|index_2|
+    +--------------------+------------------+-------+-------------------+-------+
+    |[0.27047928569511...|0.5312608102025099|      1|0.27047928569511825|      0|
+    |[0.06711381377029...|0.8775456658890036|      1|0.06711381377029987|      0|
+    |[0.10847074295048...|0.8455007754728833|      2|0.10847074295048188|      0|
+    +--------------------+------------------+-------+-------------------+-------+
+    
+    
