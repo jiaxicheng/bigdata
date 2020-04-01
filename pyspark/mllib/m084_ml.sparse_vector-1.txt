@@ -1,0 +1,53 @@
+https://stackoverflow.com/questions/60709076/randomly-swapping-column-in-pyspark-sparse-arrays
+
+An example to create Sparse Vector: 
+  given the kth item of the SparseVector, switch its value with a random item in the same Vector
+  whether or not its value is zero or non-zero:
+
+    from pyspark.ml.linalg import SparseVector, VectorUDT
+    from pyspark.sql.functions import udf
+    import numpy as np
+
+    """
+    v: column containing Sparse Vectors
+    k: col_to_swap
+    k1: random int between 0 and v.size-1
+    """
+    def swap(v, k):
+      if k >= v.size: 
+        return v
+      k1 = np.random.randint(0, v.size)
+      #print("k1=", k1)
+      return SparseVector(v.size, {
+        (k1 if v.indices[i] == k else k if v.indices[i] == k1 else v.indices[i]):v.values[i] 
+          for i in range(len(v.indices))
+      })
+    
+    df = spark.createDataFrame([
+      (e,) for e in [SparseVector(5,[1,2],[0.1,0.2]), SparseVector(5,[2,3],[0.2,0.3]), SparseVector(5,[0,4],[0,0.4])]
+    ], ['vec1'])
+
+    col_to_swap = 3
+    udf_swap = udf(lambda v: swap(v, col_to_swap), VectorUDT())
+    
+    df.withColumn('vec2', udf_swap('vec1')).show()                                                                     
+    +-------------------+-------------------+                                       
+    |               vec1|               vec2|
+    +-------------------+-------------------+
+    |(5,[1,2],[0.1,0.2])|(5,[1,2],[0.1,0.2])|
+    |(5,[2,3],[0.2,0.3])|(5,[2,3],[0.2,0.3])|
+    |(5,[0,4],[0.0,0.4])|(5,[0,3],[0.0,0.4])|
+    +-------------------+-------------------+
+
+Notes:
+(1) SparseVector can also be created by three arguments, but items in indices_array must be sorted.
+
+      SparseVector(v.size, indices_array, values_array)
+
+(2) Test function:
+
+  v1 = SparseVector(5, {1: 0.1, 3: 0.3})
+  swap(v1, 3)
+  SparseVector(5, {1: 0.1, 4: 0.3})
+
+
