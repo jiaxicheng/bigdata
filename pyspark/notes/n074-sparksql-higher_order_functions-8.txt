@@ -1,0 +1,56 @@
+Continue..
+
+Spark SQL higher-order functions:
+
+(25) drop duplicated from an ArrayType column using aggregate:
+  REF: https://stackoverflow.com/questions/60959421
+ 
+    fees_data = [[1584579671000, 12.11], [1584579672000, 12.11], [1584579673000, 12.11]];
+    fees = [ {"updated_at":u,"fee":f} for u,f in fees_data ]
+
+    status_data = [[1584579671000, "Closed-A"], [1584579672000, "Closed-A"], [1584579673000, "Closed-B"], [1584579674000, "Closed"]];
+    status = [ {"updated_at":u,"status":f} for u,f in status_data ]
+
+    schema = "fee:array<struct<updated_at:long,fee:float>>,status:array<struct<updated_at:long,status:string>>"
+
+    df = spark.createDataFrame([(fees, status)], schema=schema)
+
+    df.show(truncate=False, vertical=True)                                                                             
+    -RECORD 0------------------------------------------------------------------------------------------------------------
+     fee    | [[1584579671000, 12.11], [1584579672000, 12.11], [1584579673000, 12.11]]                                   
+     status | [[1584579671000, Closed-A], [1584579672000, Closed-A], [1584579673000, Closed-B], [1584579674000, Closed]]
+
+    root
+     |-- fee: array (nullable = true)
+     |    |-- element: struct (containsNull = true)
+     |    |    |-- updated_at: long (nullable = true)
+     |    |    |-- fee: float (nullable = true)
+     |-- status: array (nullable = true)
+     |    |-- element: struct (containsNull = true)
+     |    |    |-- updated_at: long (nullable = true)
+     |    |    |-- status: string (nullable = true)
+
+    df.selectExpr(
+      """
+        aggregate(
+          status,
+          /* start: set the initial value of `acc` as an array of structs */
+          array((bigint(NULL) as updated_at, string(NULL) as status)),
+          /* merge: check and compare y with the last item of `acc` by element_at(acc, -1) */
+          (acc, y) ->
+            CASE
+              /* the first item, status is NULL, set acc = array(y) */
+              WHEN element_at(acc, -1).updated_at is NULL THEN array(y)
+              /* if status from the last item of acc != y.status, then push y to acc */
+              WHEN element_at(acc, -1).status != y.status THEN concat(acc, array(y))
+              /* else skip y, return acc as_is */
+              ELSE acc
+            END
+        ) as status
+      """).show(truncate=False)
+    +-------------------------------------------------------------------------------+
+    |status                                                                         |
+    +-------------------------------------------------------------------------------+
+    |[[1584579671000, Closed-A], [1584579673000, Closed-B], [1584579674000, Closed]]|
+    +-------------------------------------------------------------------------------+
+    
