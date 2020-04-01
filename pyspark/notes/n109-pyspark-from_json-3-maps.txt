@@ -39,5 +39,23 @@ Notes:
     StructType into MapType is an option to row-exploding.
 (2) json_tuple is perfect for a JSON dictionary when the fieldname is known
 
+Another example: REF: https://stackoverflow.com/questions/60958869
+  Below use from_json + to_json to convert StructType into MapType and then retrieve the map_keys
+  and filter the dataframe based on the first items of the map_keys array:
 
+    from pyspark.sql.functions import from_json, to_json, map_keys
 
+    # json-24.txt contains the JSON string listed in the above mentioned SO-post
+    df = spark.read.json('/home/xicheng/test/json-24.txt',multiLine=True)
+    
+    # regex pattern provided by OP
+    ptn = '([a-z,0-9]+):([a-z,0-9]+):([a-z,0-9]+)'
+
+    df.filter(map_keys(from_json(to_json('info.extract'), 'map<string,string>'))[0].rlike(ptn)).show(10,0)
+    +---+--------------------------------------+
+    |acc|info                                  |
+    +---+--------------------------------------+
+    |0  |[[[[Doe, somewhere, Joe]],,]]         |
+    |1  |[[, [[Smith, Somewhere_else, Will]],]]|
+    |2  |[[,, [[Clapton, Eric]]]]              |
+    +---+--------------------------------------+
