@@ -1,0 +1,35 @@
+https://stackoverflow.com/questions/60982433/pyspark-mllib-convert-numerical-to-categorical#60982433
+    
+Use VectorAssembler + VectorIndexor to convert Numberical columns into categorical features    
+    
+    from pyspark.ml.feature import VectorAssembler, VectorIndexer
+    from pyspark.ml import Pipeline
+
+    my_db_query = """
+        SELECT year(created_on) as year, 
+            month(created_on) as monthnum, 
+            weekday(created_on) as weekdaynum, 
+            funded_amount 
+        FROM funding_all 
+        WHERE is_funded = 1
+    """
+    
+    df = spark.read.format("jdbc") \
+        .option("url", "jdbc:mysql://192.168.1.38/warehouse?user=xicheng&password=xxxxx") \
+        .option("query", db_query) \
+        .load()
+    
+    va = VectorAssembler(inputCols=["year", "monthnum", "weekdaynum", "funded_amount"], outputCol="f1") 
+
+    # set maxCategories to cover all possible years/months etc, so that they are treated as categorical
+    vi = VectorIndexer(inputCol="f1", outputCol="features", maxCategories=50)
+    
+    pipeline = Pipeline(stages=[va, vi]) 
+    
+    df_new = pipeline.fit(df).transform(df).drop("f1")
+    
+find the mapping from indices to actual years/months/weekno through the schema metadata associated with the `features` column:
+
+    df_new.select('features').schema.jsonValue()["fields"][0]["metadata"]["ml_attr"]["attrs"]["nominal"]
+
+
