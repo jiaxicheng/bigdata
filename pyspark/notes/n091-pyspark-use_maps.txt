@@ -121,3 +121,59 @@ Example-4: use MapType in the aggregate function of groupby
   (4) explode the resulting Map.
 
 
+Example-5: use SQL expression CASE/WHEN statement to handle the mapping from one to another:
+  
+  We have a mapping and want to convert matched items in an ArrayType column
+
+    mappings = { 
+      'PastNews': 'ContextualInformation', 
+      'ContinuingNews': 'News', 
+      'KnownAlready': 'OriginalEvent', 
+      'SignificantEventChange': 'NewSubEvent', 
+    }          
+
+    sql_epxr = "transform(Categories, x -> CASE x {} ELSE x END)".format(
+        " ".join("WHEN '{}' THEN '{}'".format(k,v) for k,v in mappings.items())
+    )
+    # this yields the following SQL expression:
+    # transform(Categories, x -> 
+    #    CASE x 
+    #      WHEN 'PastNews' THEN 'ContextualInformation' 
+    #      WHEN 'ContinuingNews' THEN 'News' 
+    #      WHEN 'KnownAlready' THEN 'OriginalEvent' 
+    #      WHEN 'SignificantEventChange' THEN 'NewSubEvent' 
+    #      ELSE x 
+    #    END
+    # )
+
+    df.withColumn('Categories_new', F.expr(sql_epxr)).show(truncate=False)                                             
+    +------------------+---------------------------------------------+-----------------------------------------+
+    |PostID            |Categories                                   |Categories_new                           |
+    +------------------+---------------------------------------------+-----------------------------------------+
+    |266269932671606786|[EmergingThreats, Factoid, KnownAlready]     |[EmergingThreats, Factoid, OriginalEvent]|
+    |266804609954234369|[Donations, ServiceAvailable, ContinuingNews]|[Donations, ServiceAvailable, News]      |
+    +------------------+---------------------------------------------+-----------------------------------------+
+
+  Notes: this applies also to regular StringType columns. So instead of creating a MapType column using F.create_map()
+         function, we can use SQL CASE/WHEN or IF() statements to do the mapping:
+
+    from pyspark.sql import functions as F
+
+    df = spark.createDataFrame([('F',44),('M',35),(None,34),('',23)],['Gender','count'])
+
+    sql_expr = "CASE Gender {} ELSE 'missing' END".format(
+        " ".join("WHEN '{}' THEN '{}'".format(k,v) for k,v in map1.items())
+    )
+
+    df.withColumn('Gender_new', F.expr(sql_expr)).show()                                                               
+    +------+-----+----------+
+    |Gender|count|Gender_new|
+    +------+-----+----------+
+    |     F|   44|    Female|
+    |     M|   35|      Male|
+    |  null|   34|   missing|
+    |      |   23|   missing|
+    +------+-----+----------+
+
+
+
