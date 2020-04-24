@@ -55,8 +55,10 @@ Example-2: delete an item from a SparseVector:
   REF: https://stackoverflow.com/questions/61348830/how-to-remove-an-item-from-sparse-vector-by-index
 
     def delete(v, k):
-      return SparseVector(v.size-1, {(v.indices[i] - int(v.indices[i] > k)):v.values[i] 
-        for i in range(len(v.indices)) if v.indices[i] != k})
+      return v if k < 0 or k > v.size else SparseVector(v.size-1, { 
+        (v.indices[i] - int(v.indices[i] > k)):v.values[i] 
+          for i in range(len(v.indices)) if v.indices[i] != k
+      })
 
     col_to_delete = 3
     udf_delete = udf(lambda v: delete(v, col_to_delete), VectorUDT())
@@ -68,4 +70,25 @@ Example-2: delete an item from a SparseVector:
     |(5,[2,3],[0.2,0.3])|      (4,[2],[0.3])|
     |(5,[0,4],[0.1,0.4])|(4,[0,3],[0.1,0.4])|
     +-------------------+-------------------+
+
+
+Example-3: delete multiple items:
+
+    def deletes(v, ks): 
+      return SparseVector(v.size-sum(int(0<=k<v.size) for k in ks), {
+        (v.indices[i] - sum(int(v.indices[i]>k>=0) for k in ks)):v.values[i] 
+          for i in range(len(v.indices)) if v.indices[i] not in ks 
+      })
+
+    udf_delete = udf(lambda v: deletes(v, [0,4]), VectorUDT())
+
+    df.withColumn('vec2', udf_delete('vec1')).show()                                                                   
+    +-------------------+-------------------+
+    |               vec1|               vec2|
+    +-------------------+-------------------+
+    |(5,[1,2],[0.1,0.2])|(3,[0,1],[0.1,0.2])|
+    |(5,[2,3],[0.2,0.3])|(3,[1,2],[0.2,0.3])|
+    |(5,[0,4],[0.1,0.4])|          (3,[],[])|
+    +-------------------+-------------------+
+
 
