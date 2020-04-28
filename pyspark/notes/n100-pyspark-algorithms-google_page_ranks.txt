@@ -1,0 +1,90 @@
+https://stackoverflow.com/questions/61410305/implement-a-page-rank-algorithm-with-pyspark
+
+Google Page Rank: https://en.wikipedia.org/wiki/PageRank
+
+  PR(u) = (1-d)/N + d*sum(PR(e)/L(e) for e in links)
+
+Where: 
+---
+* PR(e) is the page rank for link `e`
+* L(e) is the number of outdound links associated with link `e`
+* d is the dampling factor
+* N is total number of links
+
+Sample data:
+---
+page1 page3
+page2 page1
+page4 page1
+page3 page1
+page4 page2
+page3 page4
+
+Codes with RDD:
+
+    rdd = sc.textFile('/home/xicheng/test/page_rank-1.txt')
+
+    # this is an RDD reused multiple times and thus we persist it
+    links = rdd.map(lambda x: tuple(x.split())).distinct().groupByKey().cache()
+    
+    #links.mapValues(list).collect()                                                                                    
+    ##Out[603]: 
+    ##[('page1', ['page3']),
+    ## ('page2', ['page1']),
+    ## ('page4', ['page1', 'page2']),
+    ## ('page3', ['page1', 'page4'])]
+    
+    # find total number of links
+    N = links.keys().count()
+    
+    # initialize the PR for each link
+    ranks = links.mapValues(lambda x: 1/N)
+    #ranks.collect()                                                                                                    
+    ##Out[604]: [('page1', 0.25), ('page2', 0.25), ('page4', 0.25), ('page3', 0.25)]
+    
+    #damping_factor = 0.85
+    d = 0.85
+    
+    num_iterations = 10
+    
+    for _ in range(num_iterations):
+        # contributions
+        contribs = links.join(ranks) \
+            .values() \
+            .flatMap(lambda x: [ (e, x[1]/len(x[0])) for e in x[0] ])
+        # reset ranks based on contributions
+        ranks = contribs.reduceByKey(lambda x,y:x+y) \
+            .mapValues(lambda x: (1-d)/N + d*x)
+    
+    ranks.collect()
+    #[('page3', 0.343955717634314),
+    # ('page1', 0.35784449614646474),
+    # ('page2', 0.11582597531596299),
+    # ('page4', 0.18237381090325833)]
+
+
+Use DataFrame API:
+
+    from pyspark.sql.functions import lit, col
+    df = rdd.map(lambda x: tuple(x.split())).toDF(['link','to_link'])
+    links = df.groupby('link').agg(F.collect_set('to_link').alias('pages')).cache()
+    N = links.count()
+    ranks = links.selectExpr('link', f'1/{N} as rank')
+    d = 0.85
+    num_iterations = 10
+    for _ in range(num_iterations):
+      contribs = links.join(ranks, 'link').selectExpr('explode(pages) as link', 'rank/size(pages) as rank')
+      ranks = contribs.groupby('link').agg(F.sum('rank').alias('rank')) \
+          .withColumn('rank', lit((1.0-d)/N) + d*col('rank'))
+    ranks.show()                                                                                                       
+    +-----+-------------------+                                                     
+    | link|               rank|
+    +-----+-------------------+
+    |page4|0.18237381090325833|
+    |page2|0.11582597531596299|
+    |page1|0.35784449614646474|
+    |page3|  0.343955717634314|
+    +-----+-------------------+
+
+
+
