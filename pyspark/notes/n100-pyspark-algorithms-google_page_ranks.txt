@@ -65,17 +65,24 @@ Codes with RDD:
 
 Use DataFrame API:
 
-    from pyspark.sql.functions import lit, col
+    from pyspark.sql.functions import lit, col, collect_set, sum as fsum
+
     df = rdd.map(lambda x: tuple(x.split())).toDF(['link','to_link'])
-    links = df.groupby('link').agg(F.collect_set('to_link').alias('pages')).cache()
-    N = links.count()
+
+    links = df.groupby('link').agg(collect_set('to_link').alias('pages')).cache()
     ranks = links.selectExpr('link', f'1/{N} as rank')
+
+    # number of links
+    N = links.count()
+    # damping factor
     d = 0.85
+
     num_iterations = 10
     for _ in range(num_iterations):
       contribs = links.join(ranks, 'link').selectExpr('explode(pages) as link', 'rank/size(pages) as rank')
-      ranks = contribs.groupby('link').agg(F.sum('rank').alias('rank')) \
+      ranks = contribs.groupby('link').agg(fsum('rank').alias('rank')) \
           .withColumn('rank', lit((1.0-d)/N) + d*col('rank'))
+
     ranks.show()                                                                                                       
     +-----+-------------------+                                                     
     | link|               rank|
@@ -86,5 +93,32 @@ Use DataFrame API:
     |page3|  0.343955717634314|
     +-----+-------------------+
 
+  Note: this is quite slow in terms of calculation.
 
+
+Use Graphframe:
+
+    from graphframes import GraphFrame
+
+    # for testing purpose, reduce the following config setting
+    spark.conf.set("spark.sql.shuffle.partitions", 10)
+
+    df = rdd.map(lambda x: tuple(x.split())).toDF(['link','to_link'])
+
+    edges = df.toDF('src','dst') 
+    vertices = edges.selectExpr('src as id').union(edges.select('dst')).distinct()
+    g = GraphFrame(vertices, edges)
+
+    # calculate page-rank, the result is the same as Google PageRank without dividing `N` in calculating ranks
+    pr = g.pageRank(maxIter=10)
+
+    pr.vertices.show()                                                                                                  
+    +-----+------------------+
+    |   id|          pagerank|
+    +-----+------------------+
+    |page1| 1.431377984585859|
+    |page2|0.4633039012638521|
+    |page3|1.3758228705372562|
+    |page4|0.7294952436130334|
+    +-----+------------------+
 
