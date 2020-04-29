@@ -54,3 +54,44 @@ Spark SQL higher-order functions:
     |[[1584579671000, Closed-A], [1584579673000, Closed-B], [1584579674000, Closed]]|
     +-------------------------------------------------------------------------------+
     
+
+
+(26) use transform and zip_with to split strings based on position patterns
+  REF: https://stackoverflow.com/questions/61396133/create-separate-array-element-based-on-condition
+  Note: have PHONE, FAX, CELL etc, split them into corresponding items, say:
+  ---
+    from:
+      -2812597115~112211~1123645-CELL~PHONE~FAX-17-TESTB' 
+    to: 
+      -2812597115-CELL-17-TESTB
+      -112211-PHONE-17-TESTB
+      -1123645-FAX-17-TESTB
+
+    Code:
+
+    df = spark.createDataFrame([ 
+       (['-5594162570~222222-PHONE~FAX-17-TEST', '-2812597115~112211~1123645-CELL~PHONE~FAX-17-TESTB'],),
+       (['-5594162570-PHONE-17-TEST'],)
+    ], ['typed_phone_numbers']) 
+
+    """
+    : first: split typed_phone_numbers into array of arrays using split by pattern '-'
+    : second: for each inner array T, split T[1] and T[2] by '~' and use zip_with to concatenate
+    :         each corresponding items with '', T[3] and T[4]
+    : third: flatten the resulting array of arrays
+    """
+    df.selectExpr("transform(typed_phone_numbers, x -> split(x,'-')) as typed_phone_numbers") \
+        .selectExpr("""
+            flatten(
+              transform(
+                typed_phone_numbers, 
+                T -> zip_with(split(T[1],'~'),split(T[2],'~'), (x,y) -> concat_ws('-', '', x, y, T[3], T[4]))
+              )
+            ) as typed_phone_numbers
+         """).show(truncate=False)
+    +--------------------------------------------------------------------------------------------------------------------------+
+    |typed_phone_numbers                                                                                                       |
+    +--------------------------------------------------------------------------------------------------------------------------+
+    |[-5594162570-PHONE-17-TEST, -222222-FAX-17-TEST, -2812597115-CELL-17-TESTB, -112211-PHONE-17-TESTB, -1123645-FAX-17-TESTB]|
+    |[-5594162570-PHONE-17-TEST]                                                                                               |
+    +--------------------------------------------------------------------------------------------------------------------------+
