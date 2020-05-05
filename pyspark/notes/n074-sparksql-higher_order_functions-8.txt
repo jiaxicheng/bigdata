@@ -95,3 +95,38 @@ Spark SQL higher-order functions:
     |[-5594162570-PHONE-17-TEST, -222222-FAX-17-TEST, -2812597115-CELL-17-TESTB, -112211-PHONE-17-TESTB, -1123645-FAX-17-TESTB]|
     |[-5594162570-PHONE-17-TEST]                                                                                               |
     +--------------------------------------------------------------------------------------------------------------------------+
+
+
+
+(27) Using aggregate/filter+arrays_zip to filter an array items based on the value at the same indices from another Array column:
+  REF: https://stackoverflow.com/questions/61609421/filter-a-list-in-pyspark-dataframe
+
+  Below target is to filter txts which have score >= 0.5
+
+    df=spark.createDataFrame(
+      [
+        (1, ['foo1','foo2','foo3'],[0.1,0.5,0.6]), # create your data here, be consistent in the types.
+        (2, ['bar1','bar2','bar3'],[0.5,0.7,0.7]),
+        (3, ['baz1','baz2','baz3'],[0.1,0.2,0.3]),
+      ], ['id', 'txt','score'] # add your columns label here
+    ) 
+
+    df.selectExpr("*"
+      , "filter(arrays_zip(txt,score), x -> x.score >= 0.5).txt as txt_new_1"
+      , """aggregate(
+             sequence(0,size(txt)-1),
+             array(),
+             (acc,i) -> IF(score[i] >= 0.5, concat(acc,array(txt[i])), acc)
+           ) as txt_new_2
+       """).show()
+    +---+------------------+---------------+------------------+------------------+
+    | id|               txt|          score|         txt_new_1|         txt_new_2|
+    +---+------------------+---------------+------------------+------------------+
+    |  1|[foo1, foo2, foo3]|[0.1, 0.5, 0.6]|      [foo2, foo3]|      [foo2, foo3]|
+    |  2|[bar1, bar2, bar3]|[0.5, 0.7, 0.7]|[bar1, bar2, bar3]|[bar1, bar2, bar3]|
+    |  3|[baz1, baz2, baz3]|[0.1, 0.2, 0.3]|                []|                []|
+    +---+------------------+---------------+------------------+------------------+
+
+
+
+
