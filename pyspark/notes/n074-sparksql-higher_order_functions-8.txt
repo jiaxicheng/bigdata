@@ -129,4 +129,62 @@ Spark SQL higher-order functions:
 
 
 
+(28) use transform to do full-outer-join of two array of stucts columns
+  REF: https://stackoverflow.com/questions/61662553/how-can-i-full-outer-join-two-arrays-of-structs-within-a-single-row
+    
+  Target: take a FULL-OUTER Join of two array of structs columns based on some conditions
+  handle it with two separate transforms, one with the left-out-join and another handle all action_values excluded
+  from actions and then use CONCAT to merge two array of structs:
+    
+    df = spark.read.json('/home/xicheng/test/json-31.txt',multiLine=True) 
+    
+    df.printSchema()                                                                                                   
+    root
+     |-- action_values: array (nullable = true)
+     |    |-- element: struct (containsNull = true)
+     |    |    |-- action_device: string (nullable = true)
+     |    |    |-- action_type: string (nullable = true)
+     |    |    |-- value: string (nullable = true)
+     |-- actions: array (nullable = true)
+     |    |-- element: struct (containsNull = true)
+     |    |    |-- action_device: string (nullable = true)
+     |    |    |-- action_type: string (nullable = true)
+     |    |    |-- value: string (nullable = true)
+    
+    
+    spark.sql("""
+    
+      SELECT
+    
+      concat(
+        /* actions left join action_values with potentially multiple matches */
+        flatten(
+          transform(actions, x -> 
+            transform(
+              filter(action_values, y -> y.action_device = x.action_device AND y.action_type = x.action_type), 
+              z -> named_struct(
+                'action_device', x.action_device,
+                'action_type', x.action_type,
+                'count', x.value,
+                'value', z.value
+              )
+            )
+          )
+        ),
+        /* action_values missing from actions */
+        transform(
+          filter(action_values, x -> !exists(actions, y -> x.action_device = y.action_device AND x.action_type = y.action_type)),
+          z -> named_struct(
+            'action_device', z.action_device,
+            'action_type', z.action_type,
+            'count', NULL,
+            'value', z.value
+          )
+        )
+      ) as result
+    
+      FROM df_table
+    
+    """).show(truncate=False)
+    
 
