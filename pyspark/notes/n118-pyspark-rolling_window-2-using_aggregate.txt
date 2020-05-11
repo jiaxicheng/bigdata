@@ -1,0 +1,96 @@
+(2) Using higher-order function to calculate the rolling windows:
+---    
+
+Example-1: window-size is from a column, so it might be variable for different rows:
+  REF: https://stackoverflow.com/questions/61681295/sum-the-values-on-column-using-pyspark
+  Notes: should be faster than doing UDF, however complex computation might not be easy to implement.
+    
+    from pyspark.sql.functions import collect_list, struct, sort_array
+    
+    # the main dataframe
+    df = spark.createDataFrame([
+        ('ll','2020-01-05','1','10'), ('ll','2020-01-06','1','10'), ('ll','2020-01-07','1','10'),
+        ('ll','2020-01-08','1','10'), ('ll','2020-01-09','1','10'), ('ll','2020-01-10','1','10'),
+        ('ll','2020-01-11','1','20'), ('ll','2020-01-12','1','10'), ('ll','2020-01-05','2','30'),
+        ('ll','2020-01-06','2','30'), ('ll','2020-01-07','2','30'), ('ll','2020-01-08','2','40'),
+        ('ll','2020-01-09','2','30'), ('ll','2020-01-10','2','10'), ('ll','2020-01-11','2','10'),
+        ('ll','2020-01-12','2','10'),
+        ('yy','2020-01-05','1','20'), ('yy','2020-01-06','1','20'), ('yy','2020-01-07','1','20'),
+        ('yy','2020-01-08','1','20'), ('yy','2020-01-09','1','20'), ('yy','2020-01-10','1','40'),
+        ('yy','2020-01-11','1','20'), ('yy','2020-01-12','1','20'),
+        ('yy','2020-01-05','2','40'), ('yy','2020-01-06','2','40'), ('yy','2020-01-07','2','40'),
+        ('yy','2020-01-08','2','40'), ('yy','2020-01-09','2','40'), ('yy','2020-01-10','2','40'),
+        ('yy','2020-01-11','2','60'), ('yy','2020-01-12','2','40')
+    ], ('x','date','flag','value'))
+    
+    # window-size from another dataframe
+    df1 = spark.createDataFrame([('ll',5), ('yy',6)], ('x','days'))
+    
+    # join df and df1 to get array column `row` containing all sorted `date and `value` related to `x` and `flag`
+    df2 = df.groupby('x', 'flag') \
+        .agg(sort_array(collect_list(struct('date','value'))).alias('row')) \
+        .join(df1, "x", "left") 
+    df2.show()
+    +---+----+--------------------+----+                                            
+    |  x|flag|                 row|days|
+    +---+----+--------------------+----+
+    | ll|   1|[[2020-01-05, 10]...|   5|
+    | ll|   2|[[2020-01-05, 30]...|   5|
+    | yy|   2|[[2020-01-05, 40]...|   6|
+    | yy|   1|[[2020-01-05, 20]...|   6|
+    +---+----+--------------------+----+
+    
+    # for each x and flag, take the sum of rows from the current row to the following `days` rows
+    df2.selectExpr(
+        "x", 
+        "flag", 
+        """
+          inline(
+            transform(
+              row, (x,i) -> named_struct(
+                'date', x.date, 
+                'value', x.value, 
+                /* result based on the array slice using days and then take the sum */
+                'result', aggregate(slice(row,i+1,days),0L,(x,y)->x+int(y.value)) 
+              )
+            )
+          )
+        """).orderBy('x','flag','date').show(100)
+    +---+----+----------+-----+------+                                              
+    |  x|flag|      date|value|result|
+    +---+----+----------+-----+------+
+    | ll|   1|2020-01-05|   10|    50|
+    | ll|   1|2020-01-06|   10|    50|
+    | ll|   1|2020-01-07|   10|    60|
+    | ll|   1|2020-01-08|   10|    60|
+    | ll|   1|2020-01-09|   10|    50|
+    | ll|   1|2020-01-10|   10|    40|
+    | ll|   1|2020-01-11|   20|    30|
+    | ll|   1|2020-01-12|   10|    10|
+    | ll|   2|2020-01-05|   30|   160|
+    | ll|   2|2020-01-06|   30|   140|
+    | ll|   2|2020-01-07|   30|   120|
+    | ll|   2|2020-01-08|   40|   100|
+    | ll|   2|2020-01-09|   30|    60|
+    | ll|   2|2020-01-10|   10|    30|
+    | ll|   2|2020-01-11|   10|    20|
+    | ll|   2|2020-01-12|   10|    10|
+    | yy|   1|2020-01-05|   20|   140|
+    | yy|   1|2020-01-06|   20|   140|
+    | yy|   1|2020-01-07|   20|   140|
+    | yy|   1|2020-01-08|   20|   120|
+    | yy|   1|2020-01-09|   20|   100|
+    | yy|   1|2020-01-10|   40|    80|
+    | yy|   1|2020-01-11|   20|    40|
+    | yy|   1|2020-01-12|   20|    20|
+    | yy|   2|2020-01-05|   40|   240|
+    | yy|   2|2020-01-06|   40|   260|
+    | yy|   2|2020-01-07|   40|   260|
+    | yy|   2|2020-01-08|   40|   220|
+    | yy|   2|2020-01-09|   40|   180|
+    | yy|   2|2020-01-10|   40|   140|
+    | yy|   2|2020-01-11|   60|   100|
+    | yy|   2|2020-01-12|   40|    40|
+    +---+----+----------+-----+------+
+    
+    
