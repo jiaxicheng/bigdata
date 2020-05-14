@@ -34,6 +34,9 @@ Three PandasUDFType (as of Spark 2.4.3):
   + where_to_use:
     + pyspark.sql.DataFrame.withColumn()
     + pyspark.sql.DataFrame.select()
+  Notes:
+   (1) as of spark 2.4.4, MapType, StructType are not supported as output types.
+
 
 + GROUPED_MAP: 
   + function argument(key, pdf), 
@@ -60,12 +63,20 @@ Three PandasUDFType (as of Spark 2.4.3):
     + pyspark.sql.Window:
       Series.is_unique:  is_monotonic_increasing, is_monotonic_decreasing
           udf_p1 = F.pandas_udf(lambda x: x.is_unique, 'boolean', F.PandasUDFType.GROUPED_AGG)
+  Notes:
+   (1) as of spark 2.4.4, MapType, StructType are not supported as output types.
       
+Notes:
+ (1) as of spark 2.4.5, all Spark SQL data types are supported by Arrow-based conversion 
+     except MapType, ArrayType of TimestampType (i.e., slide window created by F.window function will not work
+     with pandas_udf), and nested StructType. 
+
+
 
 
 Some Examples:
 
-Example-1: pandas.Series.interpolate()
+Example-1: pandas.Series.interpolate() + GROUPED_MAP
 
 This Pandas function returns Series or DataFrame, so we can only use GROUPED_MAP:
 
@@ -123,7 +134,7 @@ This Pandas function returns Series or DataFrame, so we can only use GROUPED_MAP
     +---+----+-----+
 
 
-Example-2: calculate the cosine similarity:
+Example-2: calculate the cosine similarity + GROUPED_MAP
 REF: https://stackoverflow.com/questions/58204068/pyspark-cosinesimilarity-over-sataframe
 
     import numpy as np
@@ -199,4 +210,8 @@ Troubleshooting:
            return float(np.log(x))
            return list(np.array(...))
 
- 
+  (2) Error: PySpark 2.4.5: IllegalArgumentException when using PandasUDF
+    known issue: pandas_udf()/toPandas() does not work with pyarrow 0.15.0+ (see https://issues.apache.org/jira/browse/SPARK-29367), this is fixed as of version 2.4.5 and 3.0+. also refer to the following link:
+    REF: https://stackoverflow.com/questions/61202005/pyspark-2-4-5-illegalargumentexception-when-using-pandasudf
+
+
