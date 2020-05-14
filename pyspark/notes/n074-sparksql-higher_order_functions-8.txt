@@ -151,13 +151,14 @@ Spark SQL higher-order functions:
      |    |    |-- action_type: string (nullable = true)
      |    |    |-- value: string (nullable = true)
     
+    df.createOrReplaceTempView("df_table")
     
     spark.sql("""
     
       SELECT
     
       concat(
-        /* actions left join action_values with potentially multiple matches */
+        /* actions left join action_values with potentially one-to-multiple matched values */
         flatten(
           transform(actions, x -> 
             transform(
@@ -187,4 +188,88 @@ Spark SQL higher-order functions:
     
     """).show(truncate=False)
     
+
+
+(29) use map_from_entries to merge array of structs into MapType column. 
+
+  REF: https://stackoverflow.com/questions/61780598
+  Target: Use map_from_entries to combine an array of structs into MapType column: 
+  Notice: the key must not be NULL, thus we added a filter() **
+
+    from pyspark.sql.functions import monotonically_increasing_id, first
+
+    row1 = [['01', '100.0'], ['01', '400.0'], [None, '0.0'], ['06', '0.0'], ['01', '300'], [None, '0.0'], ['06', '200.0']]
+    row2 = [[None, '200.0'], ['06', '300.0'], ['01', '500'], ['06', '100.0'], ['01', '200'], ['07', '50.0']]
+
+    df = spark.createDataFrame([(e,) for e in [row1, row2]],['col1'])
+
+  Task-1: More general way, keys are unknown, so we will create a MapType column and then use explode+groupby+pivot
+  to pivot the data:
+
+    df1 = df.withColumn('id', monotonically_increasing_id()) \
+      .selectExpr("*", """
+
+        explode(
+          aggregate(
+            col1,
+            /* zero_value: find all non-NULL keys from all the first items of inner arrays */
+            map_from_entries(
+              filter(
+                array_distinct(
+                  /* convert item to named_struct, using x[0] as key, NULL as value */
+                  transform(col1, x -> (x[0] as k, string(NULL) as v))
+                )
+                , y -> y.k is not NULL
+              )
+            ),
+            (acc, y) ->
+              map_from_entries(
+                /* iterate through map_keys (using k) and set up values by IF(k=y[0], greatest(y[1],acc[k]), acc[k]) */
+                transform(
+                  map_keys(acc), 
+                  k -> (k as k, IF(k=y[0], greatest(y[1],acc[k]), acc[k]) as v)
+                )
+              )
+          )
+        )
+
+    """).groupby('id', 'col1') \
+      .pivot('key') \
+      .agg(first('value'))
+
+    df1.toDF(*[ c if c in ['id', 'col1'] else 'max_'+c  for c in df1.columns ]).show()
+    +---+--------------------+------+------+------+                                 
+    | id|                col1|max_01|max_06|max_07|
+    +---+--------------------+------+------+------+
+    |  1|[[, 200.0], [06, ...|   500| 300.0|  50.0|
+    |  0|[[01, 100.0], [01...| 400.0| 200.0|  null|
+    +---+--------------------+------+------+------+
+
+
+  Task-2: if the list are known, then it's much simpler, just use struct in aggregate function: see below:
+
+    df.selectExpr("col1", """ 
+      
+      aggregate(
+        col1, 
+        (string(NULL) as max_01, string(NULL) as max_06, string(NULL) as max_07), 
+        (acc, y) -> 
+          CASE
+            WHEN y[0] = '01' THEN (greatest(y[1], acc['max_01']) as max_01, acc['max_06'] as max_06, acc['max_07'] as max_07)
+            WHEN y[0] = '06' THEN (acc['max_01'] as max_01, greatest(y[1], acc['max_06']) as max_06, acc['max_07'] as max_07)
+            WHEN y[0] = '07' THEN (acc['max_01'] as max_01, acc['max_06'] as max_06, greatest(y[1], acc['max_07']) as max_07)
+            ELSE acc
+          END 
+      ) as col2
+          
+    """).select("col1", "col2.*").show() 
+    +--------------------+------+------+------+
+    |                col1|max_01|max_06|max_07|
+    +--------------------+------+------+------+
+    |[[01, 100.0], [01...| 400.0| 200.0|  null|
+    |[[, 200.0], [06, ...|   500| 300.0|  50.0|
+    +--------------------+------+------+------+
+    
+
+
 
