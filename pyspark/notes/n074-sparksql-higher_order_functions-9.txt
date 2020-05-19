@@ -1,0 +1,56 @@
+Continue..
+
+Spark SQL higher-order functions:
+
+(30) aggregate: use cast in zero_value:
+  REF: https://stackoverflow.com/questions/61854735/how-to-aggregate-on-percentiles-in-pyspark
+  Notes: instead of define `array(string(NULL))` in the zero_value, which yield a NULL as the first array item of `acc`
+    use `cast(array_repeat(array(),2) as array<array<string>>)` which not only skip the NULL item, but also force the 
+    data types of `acc` which is essential in aggregate function.
+
+    from pyspark.sql import functions as F
+
+    df = spark.createDataFrame([
+        ['a', 1, 'w'], ['a', 1, 'y'], ['a', 11, 'x'], ['a', 111, 'zzz'], ['a', 1111, 'zz'], ['a', 1111, 'zz'],
+        ['b', 2, 'w'], ['b', 2, 'w'], ['b', 2, 'w'], ['b', 22, 'y'], ['b', 2222, 'x'], ['b', 2222, 'z'],
+    ], ['grp', 'val1', 'val2'])
+
+    grouped = df.groupby('grp').agg(
+        F.count('*').alias('count'),
+        F.expr('percentile(val1, array(0.5, 0.75)) as percentiles'),
+        F.collect_list(F.struct('val1','val2')).alias('vals')
+    ) 
+
+    grouped.selectExpr(
+      "grp",
+      "count",
+      "percentiles",
+      """
+        /* less efficient version */
+        transform(percentiles, x -> 
+          size(
+            array_distinct(
+              transform(filter(vals, y -> y.val1 > x), z -> z.val2)
+            )
+          )
+        ) as distinct_count
+      """,
+      """
+        /* more efficient version */
+        aggregate( 
+          vals, 
+          /* more robust way: cast(array_repeat(array(),size(percentiles)) as array<array<string>>)*/
+          cast(array_repeat(array(),2) as array<array<string>>), 
+          (acc, y) -> 
+            transform(acc, (x,i) -> IF(y.val1 > percentiles[i], concat(x, array(y.val2)), x)) 
+          ,acc -> transform(acc, x -> size(array_distinct(x))) 
+        ) as distinct_count_1 
+      """
+    ).show(10,0)                                                                                                       
+    +---+-----+--------------+--------------+----------------+
+    |grp|count|percentiles   |distinct_count|distinct_count_1|
+    +---+-----+--------------+--------------+----------------+
+    |a  |6    |[61.0, 861.0] |[2, 1]        |[2, 1]          |
+    |b  |6    |[12.0, 1672.0]|[3, 2]        |[3, 2]          |
+    +---+-----+--------------+--------------+----------------+
+
