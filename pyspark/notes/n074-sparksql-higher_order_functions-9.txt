@@ -8,6 +8,9 @@ Spark SQL higher-order functions:
     use `cast(array_repeat(array(),2) as array<array<string>>)` which not only skip the NULL item, but also force the 
     data types of `acc` which is essential in aggregate function.
 
+  Method-1,2: use higher-order function, need spark 2.4+. 
+    * this is a very good example setting zero_value with aggregate function
+
     from pyspark.sql import functions as F
 
     df = spark.createDataFrame([
@@ -42,8 +45,8 @@ Spark SQL higher-order functions:
           /* more robust way: cast(array_repeat(array(),size(percentiles)) as array<array<string>>)*/
           cast(array_repeat(array(),2) as array<array<string>>), 
           (acc, y) -> 
-            transform(acc, (x,i) -> IF(y.val1 > percentiles[i], concat(x, array(y.val2)), x)) 
-          ,acc -> transform(acc, x -> size(array_distinct(x))) 
+            transform(acc, (x,i) -> IF(y.val1 > percentiles[i], concat(x, array(y.val2)), x)),
+          acc -> transform(acc, x -> size(array_distinct(x))) 
         ) as distinct_count_1 
       """
     ).show(10,0)                                                                                                       
@@ -53,4 +56,76 @@ Spark SQL higher-order functions:
     |a  |6    |[61.0, 861.0] |[2, 1]        |[2, 1]          |
     |b  |6    |[12.0, 1672.0]|[3, 2]        |[3, 2]          |
     +---+-----+--------------+--------------+----------------+
+
+  Method-3: just do the pre-processing before aggregation which does not require Spark 2.4+
+    
+    from pyspark.sql import Window, functions as F
+    
+    w1 = Window.partitionBy('grp')
+    
+    df1 = df.withColumn('percentiles', F.expr('percentile(val1, array(0.5, 0.75))').over(w1)) \
+        .withColumn('c1', F.expr('IF(val1>percentiles[0],val2,NULL)')) \
+        .withColumn('c2', F.expr('IF(val1>percentiles[1],val2,NULL)'))
+    
+    grouped = df1.groupby('grp').agg(
+        F.count('*').alias('count'), 
+        F.first('percentiles').alias('percentiles'), 
+        F.array(F.countDistinct('c1'), F.countDistinct('c2')).alias('distinct_count')
+    )
+    grouped.show()
+    +---+-----+--------------+--------------+                                       
+    |grp|count|   percentiles|distinct_count|
+    +---+-----+--------------+--------------+
+    |  b|    6|[12.0, 1672.0]|        [3, 2]|
+    |  a|    6| [61.0, 861.0]|        [2, 1]|
+    +---+-----+--------------+--------------+
+
+
+
+Example-31: efficient way using aggregate to create and update a Map:
+  REF: https://stackoverflow.com/questions/61947677/pyspark-higher-order-sql-functions-to-create-histograms-from-arrays
+
+  Notes: to update a Map:
+   (1) Insert a new key: use `map_concat(acc, map(y,1))`
+   (2) Update a existing key, increment the value by 1 for matched key only
+    for Spark 2.4+:  map_from_entries(transform(map_keys(acc), k -> (k as key, acc[k] + int(k=y) as val)))
+    for Spark 3.0+:  transform_values(acc, (k,v) -> v + int(k=y))
+    
+    df = spark.createDataFrame([(["val1", "val2", "val1", "val1", "val3", "val2", "val1"],)],["vals"])
+
+    # Spark 2.4+
+    df.selectExpr("*", """ 
+      aggregate( 
+        vals,  
+        cast(map() as map<string,int>), 
+        (acc,y) -> 
+          IF(acc[y] is NULL 
+              /* insert a new key */
+            , map_concat(acc, map(y,1))
+              /* update an existing key */
+            , map_from_entries(transform(map_keys(acc), k -> (k as key, acc[k] + int(k=y) as val))) 
+          ) 
+      ) as new_data 
+    """).show(1,0)      
+    +------------------------------------------+---------------------------------+
+    |vals                                      |new_data                         |
+    +------------------------------------------+---------------------------------+
+    |[val1, val2, val1, val1, val3, val2, val1]|[val1 -> 4, val2 -> 2, val3 -> 1]|
+    +------------------------------------------+---------------------------------+
+    
+    # Spark 3.0+, using transform_values:
+    df.selectExpr("*", """                                                     
+      aggregate(vals, 
+        cast(map() as map<string,int>),
+        (acc,y) -> IF(acc[y] is NULL, map_concat(acc, map(y,1)), transform_values(acc, (k,v) -> v + int(k=y)))
+      ) as new_data
+    """).show(1,0)
+    +------------------------------------------+---------------------------------+
+    |vals                                      |new_data                         |
+    +------------------------------------------+---------------------------------+
+    |[val1, val2, val1, val1, val3, val2, val1]|[val1 -> 4, val2 -> 2, val3 -> 1]|
+    +------------------------------------------+---------------------------------+
+    
+    
+    
 
