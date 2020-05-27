@@ -82,7 +82,7 @@ Spark SQL higher-order functions:
 
 
 
-Example-31: efficient way using aggregate to create and update a Map:
+(31) efficient way using aggregate to create and update a Map:
   REF: https://stackoverflow.com/questions/61947677/pyspark-higher-order-sql-functions-to-create-histograms-from-arrays
 
   Notes: to update a Map:
@@ -128,4 +128,77 @@ Example-31: efficient way using aggregate to create and update a Map:
     
     
     
+(32) Use aggregate function to do state-ful aggregation, no need to pre-sort data by using a MapType column.
+  REF: https://stackoverflow.com/questions/61965306/how-can-i-calculate-a-moving-average-with-certain-days-missing
+
+  Target: calculate a moving average: today's score + (yesterdya's score * .50) 
+  Notes: days could be missing, also post-processing to filter days with score < 0.1
+
+    from pyspark.sql.functions import expr
+  
+    df = spark.read.csv("/home/xicheng/test/window-25.txt", header=True, inferSchema=True)
+    +---+----+-----+
+    |day|user|score|
+    +---+----+-----+
+    |  0|   a|  1.1|
+    |  0|   b|  0.6|
+    |  1|   a|  0.2|
+    |  1|   b|  0.2|
+    |  1|   c|  0.6|
+    |  2|   c|  1.1|
+    |  3|   a|  0.2|
+    |  3|   b|  0.7|
+    +---+----+-----+
+  
+    # below create a MapType column: `data` with key=`day` and value=`score`
+    df2 = df.groupby('user').agg(F.expr("map_from_entries(collect_list(struct(day,score))) as data"))
+  
+    df2.selectExpr("user", """ 
+       
+        inline( 
+          aggregate( 
+            /* iterate through 1 -> 6 */
+            sequence(0,6), 
+            /* zero_value as an array of structs: array<struct<day:int,score:double>> */
+            array((int(NULL) as day, double(NULL) as score)), 
+            /* reduce, iterate by `i` */
+            (acc, i) -> 
+              CASE
+                /* first element, setup acc based on i and data[i] */
+                WHEN (element_at(acc,-1).day is NULL THEN array((i as day, ifnull(data[i],0) as score)) 
+                /* else, append an new element using day=i and score calculated by 
+                 * the previous score: element_at(acc,-1).score 
+                 * and the current score: ifnull(data[i],0)
+                 */
+                ELSE concat(acc, array((i as day, 0.5*element_at(acc,-1).score + ifnull(data[i],0) as score)))
+              END
+            /* remove array items with score < 0.1 */
+            acc -> filter(acc, x -> x.score >= 0.1) 
+          ) 
+        ) 
+  
+    """).show(22)
+    +----+---+-------------------+                                                  
+    |user|day|              score|
+    +----+---+-------------------+
+    |   c|  1|                0.6|
+    |   c|  2| 1.4000000000000001|
+    |   c|  3| 0.7000000000000001|
+    |   c|  4|0.35000000000000003|
+    |   c|  5|0.17500000000000002|
+    |   b|  0|                0.6|
+    |   b|  1|                0.5|
+    |   b|  2|               0.25|
+    |   b|  3|              0.825|
+    |   b|  4|             0.4125|
+    |   b|  5|            0.20625|
+    |   b|  6|           0.103125|
+    |   a|  0|                1.1|
+    |   a|  1|               0.75|
+    |   a|  2|              0.375|
+    |   a|  3|             0.3875|
+    |   a|  4|            0.19375|
+    +----+---+-------------------+
+
+  
 
