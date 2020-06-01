@@ -1,0 +1,85 @@
+"""
+Internet address manipulation routines: inet_aton, inet_ntoa
+
+shiftleft()      : shiftleft(1,0)   
+shiftright():    : shiftright(1,2)
+bitwise AND      : exp1 & exp2
+bitwise OR       : exp1 | exp2
+bitwise exclusive: exp1 ^ exp2
+bitwise NOT      : ~exp1
+                 : conv(ip,10,2)
+
+* inet_aton: convert the IPv4 address from the standard numbers-and-dots notation to a bigint
+shiftleft used for inet_aton
+spark.sql("select shiftleft(1,24),shiftleft(1,16),shiftleft(1,8),shiftleft(1,0)").show()
++----------------+----------------+---------------+---------------+
+|shiftleft(1, 24)|shiftleft(1, 16)|shiftleft(1, 8)|shiftleft(1, 0)|
++----------------+----------------+---------------+---------------+
+|        16777216|           65536|            256|              1|
++----------------+----------------+---------------+---------------+
+Example: 
+def inet_aton(ip):
+  return expr(f"aggregate(transform(split({ip}, '[.]'), (x,i) -> bigint(x)*shiftleft(1,(3-i)*8)), 0L, (x,y) -> x+y) as ipn")
+
+
+* inet_ntoa: convert the IPv4 address to a string in the standard numbers-and-dots notation:
+shiftleft used for inet_ntoa
+spark.sql("select shiftleft(255L,24), shiftleft(255L,16), shiftleft(255L,8), shiftleft(255L,0)").show()
++------------------+------------------+-----------------+-----------------+
+|shiftleft(255, 24)|shiftleft(255, 16)|shiftleft(255, 8)|shiftleft(255, 0)|
++------------------+------------------+-----------------+-----------------+
+|        4278190080|          16711680|            65280|              255|
++------------------+------------------+-----------------+-----------------+
+
+
+REF: 
+ [1] https://stackoverflow.com/questions/2754340/inet-aton-and-inet-ntoa-in-php
+ [2] https://stackoverflow.com/questions/62082687/pyspark-join-dataframe-based-on-function
+"""
+
+Interesting topic on INET and subnet
+
+    from pyspark.sql.functions import expr, split, array, col
+
+    df = spark.createDataFrame([(e,) for e in ['192.168.1.23', '68.192.173.70']],['ip'])
+    df1 = spark.createDataFrame([(e,) for e in ['192.168.1.23/24', '68.192.173.70/27']],['subnet'])
+
+    # convert ip_addr to a bigint
+    def inet_aton(ip):
+      """inet_atop:
+      - ip: a column containing IPv4 address in the standard numbers-and-dots notation
+      return: LongType
+      """
+      return expr(f"aggregate(zip_with(split({ip}, '[.]'), array(16777216L, 65536L, 256L, 1L), (x,y) -> bigint(x)*y), 0L, (x,y) -> x+y)")
+
+    # from a bigint to ip_addr
+    def inet_ntoa(num):
+      """inet_ntoa
+      - num: a bigint
+      return: StringType IPv4 address in the standard numbers-and-dots notation
+      """
+      return expr(f"array_join(transform(array(4278190080L, 16711680L, 65280L, 255L), (x,i) -> shiftright(x&{num},8*(3-i))),'.')")
+
+    # parse number-based ip_addr/net into an array of [ip_addr, size] to the subnet
+    # where ip_addr is the number of first ip_add in subnet, size is # of ip_address in the same subnet
+    def ip_network(ip, net):
+      return expr(f"array(ip&shiftleft(~0,32-{net}), ~shiftleft(~0,32-{net})) as ipnet")
+
+    # vlan    : array(ip_addr, mask)
+    # ip      : ip_addr in bigint
+    # vnlan   : array(ip_naddr, mask) where ip in bigint
+    # ipnrange: array(ip_n_addr_lower, ip_n_addr_upper)
+    # iprange : array(ip_addr_lower, ip_addr_upper)
+    df1.withColumn('vlan', split('subnet', '/')) \
+       .withColumn('ip', inet_aton('vlan[0]')) \
+       .withColumn('ipn', ip_network('ip', 'vlan[1]')) \
+       .withColumn('ipnrange', expr('array(ipn[0], ipn[0]+ipn[1])')) \
+       .withColumn('iprange', array(inet_ntoa('ipn[0]'), inet_ntoa('ipn[0]+ipn[1]'))) \
+       .show(truncate=False)
++----------------+-------------------+----------+-----------------+------------------------+------------------------------+
+|subnet          |vlan               |ip        |ipn              |ipnrange                |iprange                       |
++----------------+-------------------+----------+-----------------+------------------------+------------------------------+
+|192.168.1.23/24 |[192.168.1.23, 24] |3232235799|[3232235776, 255]|[3232235776, 3232236031]|[192.168.1.0, 192.168.1.255]  |
+|68.192.173.70/27|[68.192.173.70, 27]|1153477958|[1153477952, 31] |[1153477952, 1153477983]|[68.192.173.64, 68.192.173.95]|
++----------------+-------------------+----------+-----------------+------------------------+------------------------------+
+
