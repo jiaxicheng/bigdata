@@ -1,0 +1,62 @@
+https://stackoverflow.com/questions/61471077/transform-column-with-int-flags-to-array-of-strings-in-pyspark
+    
+String + Array manipulations: use conv to convert numeric column from base_10 to base_2 and split it into array of strings, then based on the item values('0' or '1') and indices, map them into a predefined array or NULL, finally remove NULL value using the filter function:
+
+    from pyspark.sql.functions import expr
+    
+    df = spark.createDataFrame([("name1", 5),("name2", 1),("name3", 0),("name4", 12)], ['name', 'traits'])
+    
+    df.selectExpr("*", "reverse(split(string(conv(traits,10,2)),'(?!$)')) as t1").show()                            
+    +-----+------+------------+
+    | name|traits|          t1|
+    +-----+------+------------+
+    |name1|     5|   [1, 0, 1]|
+    |name2|     1|         [1]|
+    |name3|     0|         [0]|
+    |name4|    12|[0, 0, 1, 1]|
+    +-----+------+------------+
+    
+    traits = [ "Traits_{}".format(i) for i in range(8) ]
+    
+    traits_array = "array({})".format(",".join("'{}'".format(e) for e in traits))
+    # array('Traits_0','Traits_1','Traits_2','Traits_3','Traits_4','Traits_5','Traits_6','Traits_7')
+    
+    sql_expr = """
+    
+        filter(
+          transform(
+            /* convert int -> binary -> string -> array of strings, and then reverse the array */
+            reverse(split(string(conv(traits,10,2)),'(?!$)')), 
+            /* take the corresponding items from the traits_array when value > 0, else NULL */
+            (x,i) -> {}[IF(x>0,i,NULL)]
+          ), 
+          /* filter out NULL items from the array */
+          y -> y is not NULL
+        ) AS trait_list
+    
+    """.format(traits_array)
+    # filter(
+    #   transform(
+    #     reverse(split(string(conv(traits,10,2)),'(?!$)')),
+    #     (x,i) -> array('Traits_0','Traits_1','Traits_2','Traits_3','Traits_4','Traits_5','Traits_6','Traits_7')[IF(x>0,i,NULL)]
+    #   ), 
+    #   y -> y is not NULL
+    # ) 
+    
+    df.withColumn("traits_list", expr(sql_expr)).show(truncate=False)
+    +-----+------+--------------------+
+    |name |traits|traits_list         |
+    +-----+------+--------------------+
+    |name1|5     |[Traits_0, Traits_2]|
+    |name2|1     |[Traits_0]          |
+    |name3|0     |[]                  |
+    |name4|12    |[Traits_2, Traits_3]|
+    +-----+------+--------------------+
+
+Notes:
+ (1) split a string into array of characters:  split(str_col, '(?!$)')
+     notice that the split-pattern `(?!$)` is used to avoid a NULL item shown as the last array item
+ (2) convert numbers between different bases: conv(num, from_base, to_base)
+ (3) convert a list of indices to a list of array values: transform + filter
+
+
