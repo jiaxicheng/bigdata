@@ -140,6 +140,64 @@ Spark SQL higher-order functions:
     |2    |[0, 4, 4, 3, 4, 2, 2, 5]|[8, 9, 7]|
     +-----+------------------------+---------+
 
+  Note: to handle decimal, will need to force the data type to the merge part of the aggregate function:
 
-    
+     sql_expr = """ 
+         transform( 
+           /* create a sequence from 0 to number_of_chunks-1 */ 
+           sequence(0,ceil(size(finalArray)/{0})-1), i -> 
+             aggregate( 
+               sequence(0,{0}-1), 
+               /* aggregate to a decimal(12,2) */
+               cast(0 as decimal(12,2)), 
+               /* force the resulting acc to decimal(12,2) 
+                * otherwise it yields the `data type mismatch` ERROR
+                */
+               (acc, y) -> cast(acc + ifnull(finalArray[i*{0}+y],0) as decimal(12,2)) 
+             ) 
+         ) 
+       """
+    df.withColumn('new_vars', expr(sql_expr.format(N))).show(truncate=False)                                           
+    +-----+------------------------+------------------+
+    |Index|finalArray              |new_vars          |
+    +-----+------------------------+------------------+
+    |1    |[0, 2, 0, 3, 1, 4, 2, 7]|[2.00, 8.00, 9.00]|
+    |2    |[0, 4, 4, 3, 4, 2, 2, 5]|[8.00, 9.00, 7.00]|
+    +-----+------------------------+------------------+
+    #DataFrame[Index: bigint, finalArray: array<bigint>, new_vars: array<decimal(12,2)>]
+
+
+
+
+(24) use aggregate + map_concat to merge a array of maps into a map
+  REF: https://stackoverflow.com/questions/60629812/how-to-convert-map-values-using-spark-built-in-functions/60646490#60646490
+  Target: retrieve the first non-null values from a map-value in a list of StructType fields
+  (a) use transform to convert an array(map_keys()) into an array of maps
+  (b) use aggregate to merge array of maps into a map
+
+    # example dataframe
+    df = spark.createDataFrame([({"k0": {"b": 100, "d":"ab" }, "k1": {"a": 1 },"k3": {"c": 12.5, "d":"ef" },"k4": {"d":"hh"}},)],"col1:map<string,struct<a:int,b:int,c:double,d:string>>")
+
+    df.selectExpr("""
+      aggregate(
+        transform(map_keys(col1), x -> map(x, coalesce(col1[x].a,col1[x].b,col1[x].c,col1[x].d))), 
+        /* zero_value: empty map */
+        map(), 
+        /* merge: use map_concat */
+        (acc,y) -> map_concat(acc, y)
+      )  as col1
+    """)
+
+  For Spark 3.0+, use transform_values:
+
+    df.selectExpr("transform_values(col1, (k,v) -> coalesce(v.a, v.b, v.c, v.d)) as col1").show(truncate=False)
+    +------------------------------------------+
+    |col1                                      |
+    +------------------------------------------+
+    |[k3 -> 12.5, k4 -> hh, k0 -> 100, k1 -> 1]|
+    +------------------------------------------+
+    #DataFrame[col1: map<string,string>]
+
+
+
 
