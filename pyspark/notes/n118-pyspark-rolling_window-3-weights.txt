@@ -1,0 +1,80 @@
+REF: https://stackoverflow.com/questions/63158118/efficiently-calculating-weighted-rolling-average-in-pyspark-with-some-caveats
+
+Calculate weighted rolling average by using collect_list and array_position function (require Spark 2.4+):
+---
+  Method:
+   (1) use the Window function collect_list, sort the list
+   (2) find the position `idx` of the current Row using array_position 
+   (3) use transform to calculate the array of weights based on the above idx
+   
+Below use a Window of size=7 (N=3) as an example:
+
+    from pyspark.sql.functions import expr, sort_array, collect_list, struct
+    from pyspark.sql import Window
+
+    df = spark.createDataFrame([
+        (0,0.5), (1,0.6), (2,0.65), (3,0.7), (4,0.77),
+        (5,0.8), (6,0.7), (7,0.9), (8,0.99), (9,0.95)
+    ], ["time", "val"])
+
+    N = 3
+
+    w1 = Window.partitionBy().orderBy('time').rowsBetween(-N,N)
+
+    # note that the index for array_position is 1-based, `i` in transform function is 0-based
+    df1 = df.withColumn('data', sort_array(collect_list(struct('time','val')).over(w1))) \
+        .withColumn('idx', expr("array_position(data, (time,val))-1")) \         
+        .withColumn('weights', expr("transform(data, (x,i) ->  10 - abs(i-idx))"))
+
+    df1.show(truncate=False)
+    +----+----+-------------------------------------------------------------------------+---+----------------------+
+    |time|val |data                                                                     |idx|weights               |
+    +----+----+-------------------------------------------------------------------------+---+----------------------+
+    |0   |0.5 |[[0, 0.5], [1, 0.6], [2, 0.65], [3, 0.7]]                                |0  |[10, 9, 8, 7]         |
+    |1   |0.6 |[[0, 0.5], [1, 0.6], [2, 0.65], [3, 0.7], [4, 0.77]]                     |1  |[9, 10, 9, 8, 7]      |
+    |2   |0.65|[[0, 0.5], [1, 0.6], [2, 0.65], [3, 0.7], [4, 0.77], [5, 0.8]]           |2  |[8, 9, 10, 9, 8, 7]   |
+    |3   |0.7 |[[0, 0.5], [1, 0.6], [2, 0.65], [3, 0.7], [4, 0.77], [5, 0.8], [6, 0.7]] |3  |[7, 8, 9, 10, 9, 8, 7]|
+    |4   |0.77|[[1, 0.6], [2, 0.65], [3, 0.7], [4, 0.77], [5, 0.8], [6, 0.7], [7, 0.9]] |3  |[7, 8, 9, 10, 9, 8, 7]|
+    |5   |0.8 |[[2, 0.65], [3, 0.7], [4, 0.77], [5, 0.8], [6, 0.7], [7, 0.9], [8, 0.99]]|3  |[7, 8, 9, 10, 9, 8, 7]|
+    |6   |0.7 |[[3, 0.7], [4, 0.77], [5, 0.8], [6, 0.7], [7, 0.9], [8, 0.99], [9, 0.95]]|3  |[7, 8, 9, 10, 9, 8, 7]|
+    |7   |0.9 |[[4, 0.77], [5, 0.8], [6, 0.7], [7, 0.9], [8, 0.99], [9, 0.95]]          |3  |[7, 8, 9, 10, 9, 8]   |
+    |8   |0.99|[[5, 0.8], [6, 0.7], [7, 0.9], [8, 0.99], [9, 0.95]]                     |3  |[7, 8, 9, 10, 9]      |
+    |9   |0.95|[[6, 0.7], [7, 0.9], [8, 0.99], [9, 0.95]]                               |3  |[7, 8, 9, 10]         |
+    +----+----+-------------------------------------------------------------------------+---+----------------------+
+
+Then we can use aggregate function to calculate the sum of weights and the weighted rolling values:
+
+    N = 9
+
+    w1 = Window.partitionBy().orderBy('time').rowsBetween(-N,N)
+
+    df_new = df.withColumn('data', sort_array(collect_list(struct('time','val')).over(w1))) \
+        .withColumn('idx', expr("array_position(data, (time,val))-1")) \
+        .withColumn('weights', expr("transform(data, (x,i) ->  10 - abs(i-idx))")) \
+        .withColumn('sum_weights', expr("aggregate(weights, 0D, (acc,x) -> acc+x)")) \
+        .withColumn('weighted_val', expr("""
+            aggregate(
+              zip_with(data,weights, (x,y) -> x.val*y),
+              0D, 
+              (acc,x) -> acc+x,
+              acc -> acc/sum_weights
+            )""")) \
+        .drop("data", "idx", "sum_weights", "weights")
+
+    df_new.show()
+    +----+----+------------------+
+    |time| val|      weighted_val|
+    +----+----+------------------+
+    |   0| 0.5|0.6827272727272726|
+    |   1| 0.6|0.7001587301587302|
+    |   2|0.65|0.7169565217391304|
+    |   3| 0.7|0.7332876712328767|
+    |   4|0.77|            0.7492|
+    |   5| 0.8|0.7641333333333333|
+    |   6| 0.7|0.7784931506849315|
+    |   7| 0.9|0.7963768115942028|
+    |   8|0.99|0.8138095238095238|
+    |   9|0.95|0.8292727272727273|
+    +----+----+------------------+
+
+
