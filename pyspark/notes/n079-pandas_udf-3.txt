@@ -1,0 +1,105 @@
+Continue..
+
+pandas_udf and related applications:
+---
+
+
+Example-7: Solve the linear sum assignment problem using pandas_udf and scipy.optimize.linear_sum_assignment
+  REF: https://stackoverflow.com/questions/63160595
+  Target: use Hungarian algorithm to find the combination of professor vs student at each timeUnit to 
+     have the maximal sum of scores
+  Method: 
+    (1) use pivot to create professor vs students matrix
+    (2) use pandas_udf and scipy.optimize.linear_sum_assignment to calculate the combination of matrix with minimal sum of scores
+    (3) use stack to normalize the resulting dataframe from (2) and then calculate is_match column
+
+Code:
+
+    from pyspark.sql.functions import pandas_udf, PandasUDFType, first, expr
+    from pyspark.sql.types import StructType
+    from scipy.optimize import linear_sum_assignment
+
+    df = spark.createDataFrame([
+        ('1596048041', 'p1', 's1', 0.7), ('1596048041', 'p1', 's2', 0.5), ('1596048041', 'p1', 's3', 0.3), 
+        ('1596048041', 'p1', 's4', 0.2), ('1596048041', 'p2', 's1', 0.9), ('1596048041', 'p2', 's2', 0.1), 
+        ('1596048041', 'p2', 's3', 0.15), ('1596048041', 'p2', 's4', 0.2), ('1596048041', 'p3', 's1', 0.2), 
+        ('1596048041', 'p3', 's2', 0.3), ('1596048041', 'p3', 's3', 0.4), ('1596048041', 'p3', 's4', 0.8), 
+        ('1596048041', 'p4', 's1', 0.2), ('1596048041', 'p4', 's2', 0.3), ('1596048041', 'p4', 's3', 0.35), 
+        ('1596048041', 'p4', 's4', 0.4) 
+     ] , ['time', 'professor_id', 'student_id', 'score'])
+
+
+  Step-1: use pivot to find the matrix of professors vs students, notice we set negative of score
+          to the values of pivot so that we can use scipy.optimize.linear_sum_assignment to find 
+          the min cost of an assignment problem:
+
+    df1 = df.groupby('time','professor_id').pivot('student_id').agg(-first('score'))
+    +----------+------------+----+----+-----+----+                                  
+    |      time|professor_id|  s1|  s2|   s3|  s4|
+    +----------+------------+----+----+-----+----+
+    |1596048041|          p4|-0.2|-0.3|-0.35|-0.4|
+    |1596048041|          p2|-0.9|-0.1|-0.15|-0.2|
+    |1596048041|          p1|-0.7|-0.5| -0.3|-0.2|
+    |1596048041|          p3|-0.2|-0.3| -0.4|-0.8|
+    +----------+------------+----+----+-----+----+
+
+    # get a list of all students
+    cols_student = df1.columns[2:]
+
+
+  Step-2: use pandas_udf and scipy.optimize.linear_sum_assignment to get column indices and then assign 
+          the corresponding column name to a new column `assigned`:
+
+    # returnSchema contains one more StringType column `assigned` than the input pdf: 
+    schema = StructType.fromJson(df1.schema.jsonValue()).add('assigned', 'string')
+
+    @pandas_udf(schema, PandasUDFType.GROUPED_MAP)
+    def find_assigned(pdf):
+      cols = pdf.columns[2:]
+      _, idx = linear_sum_assignment(pdf.iloc[:,2:].values)
+      return pdf.assign(assigned=[cols[i] for i in idx])
+
+    df2 = df1.groupby('time').apply(find_assigned) 
+    +----------+------------+----+----+-----+----+--------+                         
+    |      time|professor_id|  s1|  s2|   s3|  s4|assigned|
+    +----------+------------+----+----+-----+----+--------+
+    |1596048041|          p4|-0.2|-0.3|-0.35|-0.4|      s3|
+    |1596048041|          p2|-0.9|-0.1|-0.15|-0.2|      s1|
+    |1596048041|          p1|-0.7|-0.5| -0.3|-0.2|      s2|
+    |1596048041|          p3|-0.2|-0.3| -0.4|-0.8|      s4|
+    +----------+------------+----+----+-----+----+--------+
+
+
+  Step-3: use SparkSQL stack function to normalize the above df2 and nagate the score values. 
+          the `desired` is_match column should have `assigned==student`: 
+
+    df_new = df2.selectExpr(
+      'time', 
+      'professor_id', 
+      'assigned', 
+      'stack({},{}) as (student, score)'.format(len(cols_student), ','.join("'{}', -`{}`".format(c,c) for c in cols_student))
+    ).withColumn('is_match', expr("assigned=student"))
+
+    df_new.show()
+    +----------+------------+--------+-------+-----+--------+                       
+    |      time|professor_id|assigned|student|score|is_match|
+    +----------+------------+--------+-------+-----+--------+
+    |1596048041|          p4|      s3|     s1|  0.2|   false|
+    |1596048041|          p4|      s3|     s2|  0.3|   false|
+    |1596048041|          p4|      s3|     s3| 0.35|    true|
+    |1596048041|          p4|      s3|     s4|  0.4|   false|
+    |1596048041|          p2|      s1|     s1|  0.9|    true|
+    |1596048041|          p2|      s1|     s2|  0.1|   false|
+    |1596048041|          p2|      s1|     s3| 0.15|   false|
+    |1596048041|          p2|      s1|     s4|  0.2|   false|
+    |1596048041|          p1|      s2|     s1|  0.7|   false|
+    |1596048041|          p1|      s2|     s2|  0.5|    true|
+    |1596048041|          p1|      s2|     s3|  0.3|   false|
+    |1596048041|          p1|      s2|     s4|  0.2|   false|
+    |1596048041|          p3|      s4|     s1|  0.2|   false|
+    |1596048041|          p3|      s4|     s2|  0.3|   false|
+    |1596048041|          p3|      s4|     s3|  0.4|   false|
+    |1596048041|          p3|      s4|     s4|  0.8|    true|
+    +----------+------------+--------+-------+-----+--------+
+
+
