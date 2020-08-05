@@ -13,8 +13,8 @@ Below use a Window of size=7 (N=3) as an example:
     from pyspark.sql import Window
 
     df = spark.createDataFrame([
-        (0,0.5), (1,0.6), (2,0.65), (3,0.7), (4,0.77),
-        (5,0.8), (6,0.7), (7,0.9), (8,0.99), (9,0.95)
+        (0, 0.5), (1, 0.6), (2, 0.65), (3, 0.7), (4, 0.77),
+        (5, 0.8), (6, 0.7), (7, 0.9), (8, 0.99), (9, 0.95)
     ], ["time", "val"])
 
     N = 3
@@ -76,5 +76,59 @@ Then we can use aggregate function to calculate the sum of weights and the weigh
     |   8|0.99|0.8138095238095238|
     |   9|0.95|0.8292727272727273|
     +----+----+------------------+
+
+
+For multiple columns:
+
+    cols = ['val1', 'val2', 'val3']
+
+    df1 = df.withColumn('data', sort_array(collect_list(struct('time',*cols)).over(w1))) \
+      .withColumn('idx', expr("array_position(data, (time,{}))-1".format(','.join(cols)))) \
+      .withColumn('weights', expr("transform(data, (x,i) ->  10 - abs(i-idx))")) \
+      .withColumn('sum_weights', expr("aggregate(weights, 0D, (acc,x) -> acc+x)")) 
+
+
+ Method-1: calculate weighted_val separately(less efficient):
+
+    # function to set SQL expression to calculate weighted values for the field `val`
+    weighted_vals = lambda val: """
+        aggregate(
+          zip_with(data,weights, (x,y) -> x.{0}*y),
+          0D,
+          (acc,x) -> acc+x,
+          acc -> acc/sum_weights
+        ) as weighted_{0}
+    """.format(val)
+
+    df_new = df1.selectExpr(df.columns + [ weighted_vals(c) for c in cols ])
+
+
+ Method-2: calculate all weighted vals in one aggregate function
+   
+    # if the # of columns are limited, hard-code the SQL expression
+    sql_expr = """
+
+         aggregate( 
+           zip_with(data, weights, (x,y) -> (x.val1*y as val1, x.val2*y as val2)), 
+           (0D as val1, 0D as val2), 
+           (acc,x) -> (acc.val1 + x.val1, acc.val2 + x.val2), 
+           acc -> (acc.val1/sum_weights as weighted_val1, acc.val2/sum_weights as weighted_val2) 
+         ) 
+
+       """)
+
+    # otherwise using Python f-string to dynamically create the above SQL expression:
+    sql_expr = f"""
+
+        aggregate(
+          zip_with(data, weights, (x,y) -> ({','.join(f"x['{c}']*y as `{c}`" for c in cols)})), 
+          ({','.join(f"0D as `{c}`" for c in cols)}), 
+          (acc,x) -> ({','.join(f"acc['{c}'] + x['{c}']" for c in cols)}), 
+          acc -> ({','.join(f"acc['{c}']/sum_weights as `weighted_{c}`" for c in cols)})
+        )
+
+    """
+
+    df_new = df1.withColumn("vals", expr(sql_expr)).select(*df.columns, "vals.*")
 
 
