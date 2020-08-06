@@ -12,94 +12,189 @@ Example-7: Solve the linear sum assignment problem using pandas_udf and scipy.op
     (1) use pivot to create professor vs students matrix
     (2) use pandas_udf and scipy.optimize.linear_sum_assignment to calculate the combination of matrix with minimal sum of scores
     (3) use stack to normalize the resulting dataframe from (2) and then calculate is_match column
+  Note: for SciPy 2.4.0+, scipy.optimize.linear_sum_assignment support a parameter: maximize
+    set this to True, will return combination with max values of the sums
+
+         _, idx = linear_sum_assignment(np.vstack((n1,np.zeros((N-n,N)))), maximize=True)
+   
+    adjust the corresponding logic as following:
+    ---
+      (1) Step-1: creating df1:        -first('score')  -->  first('score')
+      (2) Step-3: `stack` statement:   -`{c}`           -->  `{c}`  
 
 Code:
 
-    from pyspark.sql.functions import pandas_udf, PandasUDFType, first, expr
+    from pyspark.sql.functions import pandas_udf, PandasUDFType, first, expr, dense_rank, broadcast
     from pyspark.sql.types import StructType
     from scipy.optimize import linear_sum_assignment
+    from pyspark.sql import Window
+    import numpy as np
 
-    df = spark.createDataFrame([
+    df = spark.createDataFrame([        
         ('1596048041', 'p1', 's1', 0.7), ('1596048041', 'p1', 's2', 0.5), ('1596048041', 'p1', 's3', 0.3), 
         ('1596048041', 'p1', 's4', 0.2), ('1596048041', 'p2', 's1', 0.9), ('1596048041', 'p2', 's2', 0.1), 
         ('1596048041', 'p2', 's3', 0.15), ('1596048041', 'p2', 's4', 0.2), ('1596048041', 'p3', 's1', 0.2), 
         ('1596048041', 'p3', 's2', 0.3), ('1596048041', 'p3', 's3', 0.4), ('1596048041', 'p3', 's4', 0.8), 
         ('1596048041', 'p4', 's1', 0.2), ('1596048041', 'p4', 's2', 0.3), ('1596048041', 'p4', 's3', 0.35), 
-        ('1596048041', 'p4', 's4', 0.4) 
+        ('1596048041', 'p4', 's4', 0.4), ('1596048042', 'p3', 's1', 0.7), ('1596048042', 'p3', 's5', 0.5), 
+        ('1596048042', 'p3', 's6', 0.3), ('1596048042', 'p3', 's7', 0.2), ('1596048042', 'p6', 's5', 0.9), 
+        ('1596048042', 'p6', 's6', 0.1), ('1596048042', 'p6', 's7', 0.15), ('1596048042', 'p9', 's5', 0.2), 
+        ('1596048042', 'p9', 's6', 0.3), ('1596048042', 'p9', 's1', 0.8) 
      ] , ['time', 'professor_id', 'student_id', 'score'])
+
+    N = 4
+    cols_student = [*range(1,N+1)]
+
+  Step-0: add an extra column student, and create a new dataframe df3 with all unique combos of time + student_id + student.
+
+    w1 = Window.partitionBy('time').orderBy('student_id')
+
+    df = df.withColumn('student', dense_rank().over(w1))
+
+    df3 = df.select('time','student_id','student').dropDuplicates()
+    +----------+----------+-------+                                                 
+    |      time|student_id|student|
+    +----------+----------+-------+
+    |1596048042|        s1|      1|
+    |1596048042|        s5|      2|
+    |1596048042|        s6|      3|
+    |1596048042|        s7|      4|
+    |1596048041|        s1|      1|
+    |1596048041|        s2|      2|
+    |1596048041|        s3|      3|
+    |1596048041|        s4|      4|
+    +----------+----------+-------+
 
 
   Step-1: use pivot to find the matrix of professors vs students, notice we set negative of score
-          to the values of pivot so that we can use scipy.optimize.linear_sum_assignment to find 
-          the min cost of an assignment problem:
+        to the values of pivot so that we can use scipy.optimize.linear_sum_assignment to find the min cost
+        of an assignment problem:
 
-    df1 = df.groupby('time','professor_id').pivot('student_id').agg(-first('score'))
-    +----------+------------+----+----+-----+----+                                  
-    |      time|professor_id|  s1|  s2|   s3|  s4|
-    +----------+------------+----+----+-----+----+
-    |1596048041|          p4|-0.2|-0.3|-0.35|-0.4|
-    |1596048041|          p2|-0.9|-0.1|-0.15|-0.2|
-    |1596048041|          p1|-0.7|-0.5| -0.3|-0.2|
-    |1596048041|          p3|-0.2|-0.3| -0.4|-0.8|
-    +----------+------------+----+----+-----+----+
+    df1 = df.groupby('time','professor_id').pivot('student', cols_student).agg(-first('score'))
+    +----------+------------+----+----+-----+-----+                                 
+    |      time|professor_id|   1|   2|    3|    4|
+    +----------+------------+----+----+-----+-----+
+    |1596048042|          p3|-0.7|-0.5| -0.3| -0.2|
+    |1596048042|          p9|-0.8|-0.2| -0.3| null|
+    |1596048042|          p6|null|-0.9| -0.1|-0.15|
+    |1596048041|          p1|-0.7|-0.5| -0.3| -0.2|
+    |1596048041|          p2|-0.9|-0.1|-0.15| -0.2|
+    |1596048041|          p3|-0.2|-0.3| -0.4| -0.8|
+    |1596048041|          p4|-0.2|-0.3|-0.35| -0.4|
+    +----------+------------+----+----+-----+-----+
 
-    # get a list of all students
-    cols_student = df1.columns[2:]
 
-
-  Step-2: use pandas_udf and scipy.optimize.linear_sum_assignment to get column indices and then assign 
-          the corresponding column name to a new column `assigned`:
+  Step-2: use pandas_udf and scipy.optimize.linear_sum_assignment to get column indices and then 
+          assign the corresponding column name to a new column `assigned`:
 
     # returnSchema contains one more StringType column `assigned` than the input pdf: 
     schema = StructType.fromJson(df1.schema.jsonValue()).add('assigned', 'string')
 
-    @pandas_udf(schema, PandasUDFType.GROUPED_MAP)
-    def find_assigned(pdf):
+    def __find_assigned(pdf, sz):
       cols = pdf.columns[2:]
-      _, idx = linear_sum_assignment(pdf.iloc[:,2:].values)
-      return pdf.assign(assigned=[cols[i] for i in idx])
+      n = pdf.shape[0]
+      n1 = pdf.iloc[:,2:].fillna(0).values
+      _, idx = linear_sum_assignment(np.vstack((n1,np.zeros((N-n,N)))))
+      return pdf.assign(assigned=[cols[i] for i in idx][:n])
+
+
+    find_assigned = pandas_udf(lambda x: __find_assigned(x,N), schema, PandasUDFType.GROUPED_MAP)
 
     df2 = df1.groupby('time').apply(find_assigned) 
-    +----------+------------+----+----+-----+----+--------+                         
-    |      time|professor_id|  s1|  s2|   s3|  s4|assigned|
-    +----------+------------+----+----+-----+----+--------+
-    |1596048041|          p4|-0.2|-0.3|-0.35|-0.4|      s3|
-    |1596048041|          p2|-0.9|-0.1|-0.15|-0.2|      s1|
-    |1596048041|          p1|-0.7|-0.5| -0.3|-0.2|      s2|
-    |1596048041|          p3|-0.2|-0.3| -0.4|-0.8|      s4|
-    +----------+------------+----+----+-----+----+--------+
+    +----------+------------+----+----+-----+-----+--------+                        
+    |      time|professor_id|   1|   2|    3|    4|assigned|
+    +----------+------------+----+----+-----+-----+--------+
+    |1596048042|          p3|-0.7|-0.5| -0.3| -0.2|       3|
+    |1596048042|          p9|-0.8|-0.2| -0.3| null|       1|
+    |1596048042|          p6|null|-0.9| -0.1|-0.15|       2|
+    |1596048041|          p1|-0.7|-0.5| -0.3| -0.2|       2|
+    |1596048041|          p2|-0.9|-0.1|-0.15| -0.2|       1|
+    |1596048041|          p3|-0.2|-0.3| -0.4| -0.8|       4|
+    |1596048041|          p4|-0.2|-0.3|-0.35| -0.4|       3|
+    +----------+------------+----+----+-----+-----+--------+
 
 
-  Step-3: use SparkSQL stack function to normalize the above df2 and nagate the score values. 
-          the `desired` is_match column should have `assigned==student`: 
+  Step-3: use SparkSQL stack function to normalize the above df2, nagate the score values and 
+          filter rows with score is NULL. the `desired` is_match column should have `assigned==student`: 
 
     df_new = df2.selectExpr(
-      'time', 
-      'professor_id', 
-      'assigned', 
-      'stack({},{}) as (student, score)'.format(len(cols_student), ','.join("'{}', -`{}`".format(c,c) for c in cols_student))
-    ).withColumn('is_match', expr("assigned=student"))
+      'time',
+      'professor_id',
+      'assigned',
+      f"""stack({len(cols_student)},{','.join(f"int('{c}'), -`{c}`" for c in cols_student)}) as (student, score)"""
+     ) \
+    .filter("score is not NULL") \
+    .withColumn('is_match', expr("assigned=student"))
 
-    df_new.show()
+    df_new.show(100)
     +----------+------------+--------+-------+-----+--------+                       
     |      time|professor_id|assigned|student|score|is_match|
     +----------+------------+--------+-------+-----+--------+
-    |1596048041|          p4|      s3|     s1|  0.2|   false|
-    |1596048041|          p4|      s3|     s2|  0.3|   false|
-    |1596048041|          p4|      s3|     s3| 0.35|    true|
-    |1596048041|          p4|      s3|     s4|  0.4|   false|
-    |1596048041|          p2|      s1|     s1|  0.9|    true|
-    |1596048041|          p2|      s1|     s2|  0.1|   false|
-    |1596048041|          p2|      s1|     s3| 0.15|   false|
-    |1596048041|          p2|      s1|     s4|  0.2|   false|
-    |1596048041|          p1|      s2|     s1|  0.7|   false|
-    |1596048041|          p1|      s2|     s2|  0.5|    true|
-    |1596048041|          p1|      s2|     s3|  0.3|   false|
-    |1596048041|          p1|      s2|     s4|  0.2|   false|
-    |1596048041|          p3|      s4|     s1|  0.2|   false|
-    |1596048041|          p3|      s4|     s2|  0.3|   false|
-    |1596048041|          p3|      s4|     s3|  0.4|   false|
-    |1596048041|          p3|      s4|     s4|  0.8|    true|
+    |1596048042|          p3|       3|      1|  0.7|   false|
+    |1596048042|          p3|       3|      2|  0.5|   false|
+    |1596048042|          p3|       3|      3|  0.3|    true|
+    |1596048042|          p3|       3|      4|  0.2|   false|
+    |1596048042|          p9|       1|      1|  0.8|    true|
+    |1596048042|          p9|       1|      2|  0.2|   false|
+    |1596048042|          p9|       1|      3|  0.3|   false|
+    |1596048042|          p6|       2|      2|  0.9|    true|
+    |1596048042|          p6|       2|      3|  0.1|   false|
+    |1596048042|          p6|       2|      4| 0.15|   false|
+    |1596048041|          p1|       2|      1|  0.7|   false|
+    |1596048041|          p1|       2|      2|  0.5|    true|
+    |1596048041|          p1|       2|      3|  0.3|   false|
+    |1596048041|          p1|       2|      4|  0.2|   false|
+    |1596048041|          p2|       1|      1|  0.9|    true|
+    |1596048041|          p2|       1|      2|  0.1|   false|
+    |1596048041|          p2|       1|      3| 0.15|   false|
+    |1596048041|          p2|       1|      4|  0.2|   false|
+    |1596048041|          p3|       4|      1|  0.2|   false|
+    |1596048041|          p3|       4|      2|  0.3|   false|
+    |1596048041|          p3|       4|      3|  0.4|   false|
+    |1596048041|          p3|       4|      4|  0.8|    true|
+    |1596048041|          p4|       3|      1|  0.2|   false|
+    |1596048041|          p4|       3|      2|  0.3|   false|
+    |1596048041|          p4|       3|      3| 0.35|    true|
+    |1596048041|          p4|       3|      4|  0.4|   false|
     +----------+------------+--------+-------+-----+--------+
+
+
+  Step-4: use join to convert student back to student_id (use broadcast join if possible):
+
+    df_new = df_new.join(df3, on=["time", "student"])
+    
+    df_new.show(100)
+    +----------+-------+------------+--------+-----+--------+----------+            
+    |      time|student|professor_id|assigned|score|is_match|student_id|
+    +----------+-------+------------+--------+-----+--------+----------+
+    |1596048042|      1|          p3|       3|  0.7|   false|        s1|
+    |1596048042|      2|          p3|       3|  0.5|   false|        s5|
+    |1596048042|      3|          p3|       3|  0.3|    true|        s6|
+    |1596048042|      4|          p3|       3|  0.2|   false|        s7|
+    |1596048042|      1|          p9|       1|  0.8|    true|        s1|
+    |1596048042|      2|          p9|       1|  0.2|   false|        s5|
+    |1596048042|      3|          p9|       1|  0.3|   false|        s6|
+    |1596048042|      2|          p6|       2|  0.9|    true|        s5|
+    |1596048042|      3|          p6|       2|  0.1|   false|        s6|
+    |1596048042|      4|          p6|       2| 0.15|   false|        s7|
+    |1596048041|      1|          p1|       2|  0.7|   false|        s1|
+    |1596048041|      2|          p1|       2|  0.5|    true|        s2|
+    |1596048041|      3|          p1|       2|  0.3|   false|        s3|
+    |1596048041|      4|          p1|       2|  0.2|   false|        s4|
+    |1596048041|      1|          p2|       1|  0.9|    true|        s1|
+    |1596048041|      2|          p2|       1|  0.1|   false|        s2|
+    |1596048041|      3|          p2|       1| 0.15|   false|        s3|
+    |1596048041|      4|          p2|       1|  0.2|   false|        s4|
+    |1596048041|      1|          p3|       4|  0.2|   false|        s1|
+    |1596048041|      2|          p3|       4|  0.3|   false|        s2|
+    |1596048041|      3|          p3|       4|  0.4|   false|        s3|
+    |1596048041|      4|          p3|       4|  0.8|    true|        s4|
+    |1596048041|      1|          p4|       3|  0.2|   false|        s1|
+    |1596048041|      2|          p4|       3|  0.3|   false|        s2|
+    |1596048041|      3|          p4|       3| 0.35|    true|        s3|
+    |1596048041|      4|          p4|       3|  0.4|   false|        s4|
+    +----------+-------+------------+--------+-----+--------+----------+
+
+    df_new = df_new.drop("student", "assigned")
 
 
