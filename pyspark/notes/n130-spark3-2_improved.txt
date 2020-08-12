@@ -1,0 +1,63 @@
+Continue..
+
+Improved SparkSQL functions
+---
+
+(1) array_sort(arr, (l,r) -> func(l,r)):
+ new argument:
+   - func(l,r) is a function returning -1,0,1 (neg_int, 0 or pos_int)
+   - raise ERROR if func return flost, double or NULL
+ some useful:
+   IF(l >= r, 1, -1)
+   int(sign(l-r))     <-- sign() returns double, must be forced to int
+
+  Example: sort array of structs by the 3rd fields of the struct
+  
+    from pyspark.sql.functions import expr
+
+    df = spark.createDataFrame([(1,2,2),(3,2,1),(3,1,5),(2,1,5),(2,2,0)],["id","a","b"])
+
+    df_new = df \
+        .groupby("id") \
+        .agg(expr("array_sort(collect_list((id,a,b)),(x,y) -> int(x.b-y.b))").alias('dt'))
+
+    df_new.show(10,0)
+    +---+----------------------+                                                    
+    |id |dt                    |
+    +---+----------------------+
+    |1  |[[1, 2, 2]]           |
+    |3  |[[3, 2, 1], [3, 1, 5]]|
+    |2  |[[2, 2, 0], [2, 1, 5]]|
+    +---+----------------------+
+
+  Note: for version before 3.0 but 2.4+, move field-b to the first when creating collect_list, and later use transform to
+        reset the field order of structs:
+
+          df_new = df \
+              .groupby("id") \
+              .agg(expr("array_sort(collect_list((b,id,a)))").alias('dt')) \
+              .withColumn('dt', expr("transform(dt,x->(x.id as id,x.a as a,x.b as b))"))
+
+
+(2) array_join(arr, delimiter, nullReplacement):
+  new argument: nullReplacement
+    - null items are skipped if nullReplacement is not specified
+
+
+
+(3) filter(arr, (x,i) -> func(x,i))
+  new: the filter predicte now support two argument including item value and its index: (x,i) 
+
+
+
+(4) split(str, regex, limit)
+  new argument: `limit` is an integer expression which controls the number of times the regex is applied.
+  limit > 0: The resulting array's size is no more than limit
+  limit <= 0: no limit
+
+
+
+
+
+
+
