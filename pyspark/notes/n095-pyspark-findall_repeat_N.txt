@@ -1,0 +1,114 @@
+REF: https://stackoverflow.com/questions/63369936
+
+Using pyspark's way to find all matched items from a regex pattern column:
+
+  Target: we have a mapping of iso2 to keywords containing regex patterns, we want to find all 
+          matched iso2 in a text column, each match must return its own iso2 code:
+  Method: (1) use left join to to match df.address with df1.keywords, this will return only one iso2
+              for each matched keyword
+          (2) use regexp_replace + regexp_replace + split to convert `address` into an ArrayType
+              column containing all matches
+          (3) explode the above array and then do groupby and aggregate.
+
+Code:
+
+    from pyspark.sql.functions import expr, first, collect_list, monotonically_increasing_id, array_join, collect_set
+
+    df = spark.createDataFrame([
+        ["3030 Whispering Pines Circle, Prosper Texas, US","John"],   
+        ["Kalverstraat Amsterdam","Mary"],   
+        ["Kalverstraat Amsterdam, Netherlands","Lex"] 
+    ]).toDF("address","name")
+
+
+    df_regex = spark.createDataFrame([
+        ('US', '\bArizona\b'), ('US', '\bTexas\b'), ('US', '\bFlorida\b'), ('US', '\bChicago\b'), 
+        ('US', '\bAmsterdam\b'), ('US', '\bProsper\b'), ('US', '\bUS$'),
+        ('CA', '\bAlberta\b'), ('CA', '\bNova Scotia\b'), ('CA', '\bNova Scotia\b'), 
+        ('CA', '\bWhitehorse\b'), ('CA', '\bCA$'),
+        ('NL', '\bAmsterdam\b'), ('NL', '\bNetherlands\b'), ('NL', '\bNL$') 
+    ], ['iso2', 'keywords'])
+    
+**Step-1:** convert df_regex to a Spark dataframe `df1` and add an unique_id to df
+
+    df1 = df_regex.groupby('iso2').agg(array_join(collect_set('keywords'),'|').alias('keywords'))
+    +----+-----------------------------------------------------------------------------+
+    |iso2|keywords                                                                     |
+    +----+-----------------------------------------------------------------------------+
+    |CA  |\bAlberta\b|\bNova Scotia\b|\bNova Scotia\b|\bWhitehorse\b|\bCA$             |
+    |NL  |\bAmsterdam\b|\bNetherlands\b|\bNL$                                          |
+    |US  |\bArizona\b|\bTexas\b|\bFlorida\b|\bChicago\b|\bAmsterdam\b|\bProsper\b|\bUS$|
+    +----+-----------------------------------------------------------------------------+
+
+    df = df.withColumn('id', monotonically_increasing_id())
+    +-----------------------------------------------+----+---+
+    |address                                        |name|id |
+    +-----------------------------------------------+----+---+
+    |3030 Whispering Pines Circle, Prosper Texas, US|John|0  |
+    |Kalverstraat Amsterdam                         |Mary|1  |
+    |Kalverstraat Amsterdam, Netherlands            |Lex |2  |
+    +-----------------------------------------------+----+---+
+
+
+**Step-2:** left join df_regex to df using rlike
+
+    df2 = df.alias('d1').join(df1.alias('d2'), expr("d1.address rlike d2.keywords"), "left")
+    +--------------------+----+---+----+--------------------+
+    |             address|name| id|iso2|            keywords|
+    +--------------------+----+---+----+--------------------+
+    |3030 Whispering P...|John|  0|  US|\bArizona\b|\bTex...|
+    |Kalverstraat Amst...|Mary|  1|  NL|\bAmsterdam\b|\bN...|
+    |Kalverstraat Amst...|Mary|  1|  US|\bArizona\b|\bTex...|
+    |Kalverstraat Amst...| Lex|  2|  NL|\bAmsterdam\b|\bN...|
+    |Kalverstraat Amst...| Lex|  2|  US|\bArizona\b|\bTex...|
+    +--------------------+----+---+----+--------------------+
+
+
+**Step-3:** use regexp_replace to replace `.*?(keywords)` to `_$1_`, then use regexp_replace to remove
+   the leading `_` and the trailing `_[^_]*$` using pattern `^_|_[^_]*$`
+
+    df3 = df2.withColumn('matches', expr("""
+            regexp_replace(
+              regexp_replace(d1.address, '(?im).*?('||d2.keywords||')', '_$1_'),
+              '^_|_[^_]*$', 
+              '')
+          """))
+
+    df3.select('address','id','name','iso2','matches')
+    +-----------------------------------------------+---+----+----+----------------------+
+    |address                                        |id |name|iso2|matches               |
+    +-----------------------------------------------+---+----+----+----------------------+
+    |3030 Whispering Pines Circle, Prosper Texas, US|0  |John|US  |Prosper__Texas__US    |
+    |Kalverstraat Amsterdam                         |1  |Mary|NL  |Amsterdam             |
+    |Kalverstraat Amsterdam                         |1  |Mary|US  |Amsterdam             |
+    |Kalverstraat Amsterdam, Netherlands            |2  |Lex |NL  |Amsterdam__Netherlands|
+    |Kalverstraat Amsterdam, Netherlands            |2  |Lex |US  |Amsterdam             |
+    +-----------------------------------------------+---+----+----+----------------------+
+
+**Notes:**
+  1. the delimiter underscore `_` can be adjusted to another character (for example NUL char `\0`) in case `_` shown in the text of address column which might collide with the result.
+
+  2. `'(?im).*?('||d2.keywords||')'` is to generate a pattern like the following 
+
+      (?im).*?(\bArizona\b|\bTexas\b|\bFlorida\b|\bChicago\b|\bAmsterdam\b|\bProsper\b|\bUS$)
+
+     where `||` is for concatenating under SparkSQL context), and (?im) is the same as (re.I|re.M)
+
+
+**Step-4:** split the matches by '__' into array and then explode the results
+
+    df_new = df3.selectExpr('id','iso2','name','address',"explode(split(matches, '__')) as match") \
+        .groupby('id') \
+        .agg(
+          first('address').alias('address'), 
+          first('name').alias('name'), 
+          collect_list('iso2').alias('countries')
+        )
+    +---+-----------------------------------------------+----+------------+
+    |id |address                                        |name|countries   |
+    +---+-----------------------------------------------+----+------------+
+    |0  |3030 Whispering Pines Circle, Prosper Texas, US|John|[US, US, US]|
+    |1  |Kalverstraat Amsterdam                         |Mary|[NL, US]    |
+    |2  |Kalverstraat Amsterdam, Netherlands            |Lex |[NL, NL, US]|
+    +---+-----------------------------------------------+----+------------+
+
