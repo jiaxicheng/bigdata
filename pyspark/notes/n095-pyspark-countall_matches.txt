@@ -36,7 +36,7 @@ Code:
 **Step-1:** set up regex patterns using Pandas, convert df_regex to a Spark dataframe `df1` and add an unique_id to df
 
     # adjust keywords to uppercase except chars preceded with backslash:
-    df_regex["keywords"] = df_regex["keywords"].str.replace(r'(\\.)([^\\]*)', lambda m: m.group(1) + m.group(2).upper())
+    df_regex["keywords"] = df_regex["keywords"].str.replace(r'(^|\\.)([^\\]*)', lambda m: m.group(1) + m.group(2).upper())
 
     # create regex patterns: prepend a `m` flag using `(?m)`
     df_regex = df_regex.groupby('iso2').agg({'keywords':lambda x: '(?m)' + '|'.join(x)}).reset_index()

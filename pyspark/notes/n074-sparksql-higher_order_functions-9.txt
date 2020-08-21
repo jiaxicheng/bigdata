@@ -273,6 +273,6 @@ Spark SQL higher-order functions:
         .withColumn('idx', expr("filter(sequence(0,size(vals)-1), i -> vals[i].col1=1)[0]")) \
         .withColumn('offset', expr("IF(vals[idx].col2=-1, filter(sequence(1,idx), i -> vals[idx-i].col2 != -1)[0],0)")) \
         .withColumn("cur_idx", expr("array_position(vals, struct(date,col1,col2))-1")) \
-        .selectExpr(*df.columns, "IF(cur_idx<idx, 0, vals[idx-offset].col2 + offset + cur_idx - idx) as want") 
+        .selectExpr(*TEST_df.columns, "IF(cur_idx<idx, 0, vals[idx-offset].col2 + offset + cur_idx - idx) as want") 
 
 
