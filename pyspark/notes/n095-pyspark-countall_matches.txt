@@ -1,0 +1,156 @@
+https://stackoverflow.com/questions/63369936
+
+Using pyspark's way to count the number of all matched items from a regex pattern column:
+
+  Target: we have a mapping of iso2 to keywords containing regex patterns, we want to find all 
+          matched iso2 in a text column, each match must return its own iso2 code:
+  Method: (1) set up regex patterns using pandas and then convert df_regex to Spark dataframe(df1)
+          (2) use left join to to match df.address with df1.keywords, this will return only one iso2
+              for each matched keyword
+          (3) use regexp_replace + split + size to calculate the number of items matching the keywords in address
+          (4) use array_repeat to create an Array containing num_matches of iso2
+          (5) groupby+collect_list to create and flatten the array of arrays into an array of iso2's
+
+Code:
+
+    from pyspark.sql.functions import expr, first, collect_list, monotonically_increasing_id, flatten
+    import pandas as pd
+
+    df = spark.createDataFrame([
+        ["3030 Whispering Pines Circle, Prosper Texas, US","John"],   
+        ["Kalverstraat Amsterdam","Mary"],   
+        ["Kalverstraat Amsterdam, Netherlands","Lex"],
+        ["xvcv", "ddd"]
+    ]).toDF("address","name")
+
+    # Pandas dataframe containing country to keywords pattern mapping
+    df_regex = pd.DataFrame([
+        ('US', r'\bArizona\b'), ('US', r'\bTexas\b'), ('US', r'\bFlorida\b'), ('US', r'\bChicago\b'),
+        ('US', r'\bAmsterdam\b'), ('US', r'\bProsper\b'), ('US', r'\bUS$'),
+        ('CA', r'\bAlberta\b'), ('CA', r'\bNova Scotia\b'), ('CA', r'\bNova Scotia\b'), 
+        ('CA', r'\bWhitehorse\b'), ('CA', r'\bCA$'),
+        ('NL', r'\bAmsterdam\b'), ('NL', r'\bNetherlands\b'), ('NL', r'\bNL$') 
+    ], columns=['iso2', 'keywords'])
+
+    
+**Step-1:** set up regex patterns using Pandas, convert df_regex to a Spark dataframe `df1` and add an unique_id to df
+
+    # adjust keywords to uppercase except chars preceded with backslash:
+    df_regex["keywords"] = df_regex["keywords"].str.replace(r'(\\.)([^\\]*)', lambda m: m.group(1) + m.group(2).upper())
+
+    # create regex patterns: prepend a `m` flag using `(?m)`
+    df_regex = df_regex.groupby('iso2').agg({'keywords':lambda x: '(?m)' + '|'.join(x)}).reset_index()
+
+    df1 = spark.createDataFrame(df_regex)
+    df1.show(truncate=False)
+    +----+---------------------------------------------------------------------------------+
+    |iso2|keywords                                                                         |
+    +----+---------------------------------------------------------------------------------+
+    |CA  |(?m)\bALBERTA\b|\bNOVA SCOTIA\b|\bNOVA SCOTIA\b|\bWHITEHORSE\b|\bCA$             |
+    |NL  |(?m)\bAMSTERDAM\b|\bNETHERLANDS\b|\bNL$                                          |
+    |US  |(?m)\bARIZONA\b|\bTEXAS\b|\bFLORIDA\b|\bCHICAGO\b|\bAMSTERDAM\b|\bPROSPER\b|\bUS$|
+    +----+---------------------------------------------------------------------------------+
+    
+    df = df.withColumn('id', monotonically_increasing_id())
+    +-----------------------------------------------+----+---+
+    |address                                        |name|id |
+    +-----------------------------------------------+----+---+
+    |3030 Whispering Pines Circle, Prosper Texas, US|John|0  |
+    |Kalverstraat Amsterdam                         |Mary|1  |
+    |Kalverstraat Amsterdam, Netherlands            |Lex |2  |
+    |xvcv                                           |ddd |3  |
+    +-----------------------------------------------+----+---+
+
+
+**Step-2:** left join df_regex to df using rlike
+
+    df2 = df.alias('d1').join(broadcast(df1.alias('d2')), expr("upper(d1.address) rlike d2.keywords"), "left")
+    df2.show()
+    +--------------------+----+---+----+--------------------+
+    |             address|name| id|iso2|            keywords|
+    +--------------------+----+---+----+--------------------+
+    |3030 Whispering P...|John|  0|  US|(?m)\bARIZONA\b|\...|
+    |Kalverstraat Amst...|Mary|  1|  NL|(?m)\bAMSTERDAM\b...|
+    |Kalverstraat Amst...|Mary|  1|  US|(?m)\bARIZONA\b|\...|
+    |Kalverstraat Amst...| Lex|  2|  NL|(?m)\bAMSTERDAM\b...|
+    |Kalverstraat Amst...| Lex|  2|  US|(?m)\bARIZONA\b|\...|
+    |                xvcv| ddd|  3|null|                null|
+    +--------------------+----+---+----+--------------------+
+
+
+**Step-3:** count number of matched *d2.keywords* in *d1.address* by using *regexp_replace* to convert each match of keywords in address into two NUL chars `\0\0`, and then count number of `\0\0`s by `size(split(.., '\0\0'))-1`:
+
+    df3 = df2.withColumn('num_matches', expr("size(split(regexp_replace(upper(d1.address), d2.keywords, '\0\0'),'\0\0'))-1"))
+    df3.show()                                                                                                          
+    +--------------------+----+---+----+--------------------+-----------+
+    |             address|name| id|iso2|            keywords|num_matches|
+    +--------------------+----+---+----+--------------------+-----------+
+    |3030 Whispering P...|John|  0|  US|(?m)\bARIZONA\b|\...|          3|
+    |Kalverstraat Amst...|Mary|  1|  NL|(?m)\bAMSTERDAM\b...|          1|
+    |Kalverstraat Amst...|Mary|  1|  US|(?m)\bARIZONA\b|\...|          1|
+    |Kalverstraat Amst...| Lex|  2|  NL|(?m)\bAMSTERDAM\b...|          2|
+    |Kalverstraat Amst...| Lex|  2|  US|(?m)\bARIZONA\b|\...|          1|
+    |                xvcv| ddd|  3|null|                null|         -2|
+    +--------------------+----+---+----+--------------------+-----------+
+
+
+**Step-4:** use `array_repeat` to repeat the value of `iso2` `num_matches` times (require **Spark 2.4+**):
+
+    df4 = df3.withColumn("iso2", expr("array_repeat(iso2, num_matches)"))
+    df4.show()                                                                                                          
+    +--------------------+----+---+------------+--------------------+-----------+
+    |             address|name| id|        iso2|            keywords|num_matches|
+    +--------------------+----+---+------------+--------------------+-----------+
+    |3030 Whispering P...|John|  0|[US, US, US]|(?m)\bARIZONA\b|\...|          3|
+    |Kalverstraat Amst...|Mary|  1|        [NL]|(?m)\bAMSTERDAM\b...|          1|
+    |Kalverstraat Amst...|Mary|  1|        [US]|(?m)\bARIZONA\b|\...|          1|
+    |Kalverstraat Amst...| Lex|  2|    [NL, NL]|(?m)\bAMSTERDAM\b...|          2|
+    |Kalverstraat Amst...| Lex|  2|        [US]|(?m)\bARIZONA\b|\...|          1|
+    |                xvcv| ddd|  3|          []|                null|         -2|
+    +--------------------+----+---+------------+--------------------+-----------+
+
+
+**Step-5:** groupby and do the aggregation:
+
+    df_new = df4 \
+        .groupby('id') \
+        .agg(
+           first('address').alias('address'),
+           first('name').alias('name'),
+           flatten(collect_list('iso2')).alias('countries')
+    )
+    df_new.show()                                                                                                       
+    +---+--------------------+----+------------+                                    
+    | id|             address|name|   countries|
+    +---+--------------------+----+------------+
+    |  0|3030 Whispering P...|John|[US, US, US]|
+    |  1|Kalverstraat Amst...|Mary|    [NL, US]|
+    |  3|                xvcv| ddd|          []|
+    |  2|Kalverstraat Amst...| Lex|[NL, NL, US]|
+    +---+--------------------+----+------------+
+
+
+**Alternative:** Step-3 can also be handled by Pandas UDF:
+
+    from pyspark.sql.functions import pandas_udf, PandasUDFType
+    from pandas import Series
+    import re
+
+    @pandas_udf("int", PandasUDFType.SCALAR)
+    def get_num_matches(addr, ptn):
+      return Series([ 0 if p is None else len(re.findall(p,s)) for p,s in zip(ptn,addr) ])
+
+    df3 = df2.withColumn("num_matches", get_num_matches(expr('upper(address)'), 'keywords'))
+    df3.show()
+    +--------------------+----+---+----+--------------------+-----------+
+    |             address|name| id|iso2|            keywords|num_matches|
+    +--------------------+----+---+----+--------------------+-----------+
+    |3030 Whispering P...|John|  0|  US|(?m)\bARIZONA\b|\...|          3|
+    |Kalverstraat Amst...|Mary|  1|  NL|(?m)\bAMSTERDAM\b...|          1|
+    |Kalverstraat Amst...|Mary|  1|  US|(?m)\bARIZONA\b|\...|          1|
+    |Kalverstraat Amst...| Lex|  2|  NL|(?m)\bAMSTERDAM\b...|          2|
+    |Kalverstraat Amst...| Lex|  2|  US|(?m)\bARIZONA\b|\...|          1|
+    |                xvcv| ddd|  3|null|                null|          0|
+    +--------------------+----+---+----+--------------------+-----------+
+
+
