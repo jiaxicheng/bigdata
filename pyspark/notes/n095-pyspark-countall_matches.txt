@@ -7,7 +7,7 @@ Using pyspark's way to count the number of all matched items from a regex patter
   Method: (1) set up regex patterns using pandas and then convert df_regex to Spark dataframe(df1)
           (2) use left join to to match df.address with df1.keywords, this will return only one iso2
               for each matched keyword
-          (3) use regexp_replace + split + size to calculate the number of items matching the keywords in address
+          (3) use split + size to calculate the number of items matching the keywords in address
           (4) use array_repeat to create an Array containing num_matches of iso2
           (5) groupby+collect_list to create and flatten the array of arrays into an array of iso2's
 
@@ -78,10 +78,10 @@ Code:
     +--------------------+----+---+----+--------------------+
 
 
-**Step-3:** count number of matched *d2.keywords* in *d1.address* by using *regexp_replace* to convert each match of keywords in address into two NUL chars `\0\0`, and then count number of `\0\0`s by `size(split(.., '\0\0'))-1`:
+**Step-3:** count number of matched *d2.keywords* in *d1.address* by splitting *d1.address* by *d2.keywords* and then reducing the size of the resulting array by 1:
 
-    df3 = df2.withColumn('num_matches', expr("size(split(regexp_replace(upper(d1.address), d2.keywords, '\0\0'),'\0\0'))-1"))
-    df3.show()                                                                                                          
+    df3 = df2.withColumn('num_matches', expr("size(split(upper(d1.address), d2.keywords))-1"))
+    df3.show() 
     +--------------------+----+---+----+--------------------+-----------+
     |             address|name| id|iso2|            keywords|num_matches|
     +--------------------+----+---+----+--------------------+-----------+
