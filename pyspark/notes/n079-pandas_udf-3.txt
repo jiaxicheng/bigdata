@@ -198,3 +198,75 @@ Code:
     df_new = df_new.drop("student", "assigned")
 
 
+
+Example-8: use pandas_udf with broadcast variable
+  REF: https://stackoverflow.com/questions/63369936
+  Target: we have a mapping of iso2 to keywords containing regex patterns, we want to find all 
+          matched iso2 in a text column, each match must return its own iso2 code:
+  Method: (1) set up regex patterns to a dictionary and broadcast it to worker nodes
+          (2) use pandas_udf and re.findall to return an array of arrays of string
+          (3) use flatten to merge (2) into array of strings 
+  Code:
+
+    from pyspark.sql.functions import expr, flatten, pandas_udf, PandasUDFType
+    from pandas import Series, read_csv
+    import re
+
+    df = spark.createDataFrame([
+        ["3030 Whispering Pines Circle, Prosper Texas, US","John"],   
+        ["Kalverstraat Amsterdam","Mary"],   
+        ["Kalverstraat Amsterdam, Netherlands","Lex"],
+        ["xvcv", "ddd"]
+    ]).toDF("address","name")
+
+    # Pandas dataframe containing country to keywords pattern mapping
+    df_regex = read_csv("file:///home/xicheng/test/regex.csv", sep=";")
+
+    df_regex["keywords"] = df_regex["keywords"].str.replace(r'(^|\\.)([^\\]*)', lambda m: m.group(1) + m.group(2).upper())
+
+    df_ptn = spark.sparkContext.broadcast(
+        df_regex.groupby('iso2').agg({'keywords':lambda x: '(?m)' + '|'.join(x)})["keywords"].to_dict()
+    )
+    df_ptn.value
+    #{'CA': '(?m)\\bALBERTA\\b|\\bNOVA SCOTIA\\b|\\bNOVA SCOTIA\\b|\\bWHITEHORSE\\b|\\bCA$',
+    # 'NL': '(?m)\\bAMSTERDAM\\b|\\bNETHERLANDS\\b|\\bNL$',
+    # 'US': '(?m)\\bARIZONA\\b|\\bTEXAS\\b|\\bFLORIDA\\b|\\bCHICAGO\\b|\\bAMSTERDAM\\b|\\bPROSPER\\b|\\bUS$'}
+
+  Method-1: return an array of arrays and do flatten with Spark:
+
+    def __get_iso2_1(addr, ptn):    
+      return Series([ [[k]*len(re.findall(v,s)) for k,v in ptn.value.items()] for s in addr ])
+
+    get_iso2_1 = pandas_udf(lambda x:__get_iso2_1(x, df_ptn), "array<array<string>>", PandasUDFType.SCALAR)
+
+    df.withColumn('iso2', flatten(get_iso2_1(expr("upper(address)")))).show()
+    +--------------------+----+------------+                                        
+    |             address|name|        iso2|
+    +--------------------+----+------------+
+    |3030 Whispering P...|John|[US, US, US]|
+    |Kalverstraat Amst...|Mary|    [NL, US]|
+    |Kalverstraat Amst...| Lex|[NL, NL, US]|
+    |                xvcv| ddd|          []|
+    +--------------------+----+------------+
+
+  Method-2: flatten the list using Python REF: https://stackoverflow.com/questions/952914
+
+    from operator import iconcat
+    from functools import reduce
+
+    def __get_iso2_2(addr, ptn): 
+      return Series([ reduce(iconcat, [[k]*len(re.findall(v,s)) for k,v in ptn.value.items()]) for s in addr ])
+
+    get_iso2_2 = pandas_udf(lambda x:__get_iso2_2(x, df_ptn), "array<string>", PandasUDFType.SCALAR)
+
+    df.withColumn('iso2', get_iso2_2(expr("upper(address)"))).show()                                                     
+    +--------------------+----+------------+
+    |             address|name|        iso2|
+    +--------------------+----+------------+
+    |3030 Whispering P...|John|[US, US, US]|
+    |Kalverstraat Amst...|Mary|    [NL, US]|
+    |Kalverstraat Amst...| Lex|[NL, NL, US]|
+    |                xvcv| ddd|          []|
+    +--------------------+----+------------+
+
+
