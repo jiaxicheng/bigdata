@@ -154,3 +154,90 @@ Code:
     +--------------------+----+---+----+--------------------+-----------+
 
 
+Since both `join` and `groupby` trigger data shuffling, the above method does not necessarily run faster than an UDF. this method is more practical when df_regex is hugh and has to be saved on a distributed way.
+
+On the other hand, if the SQL created from the df_regex can be loaded on driver and parsed, then the calculation can be based on list comprehension directly. The below method is not a scalable but shuold be a better choice on the smaller df_regex dataset:
+
+
+    from pyspark.sql.functions import size, split, upper, col, array, expr, flatten, array
+
+    df_regex = pd.read_csv("file:///path/to/regex.csv", sep=";")
+    df_regex["keywords"] = df_regex["keywords"].str.replace(r'(^|\\.)([^\\]*)', lambda m: m.group(1) + m.group(2).upper())
+
+  Method-1: two steps, using DSL to split by df_ptn (no need to escape backslashes) and then do array_repeat:
+
+    df_ptn = df_regex.groupby('iso2').agg({'keywords':lambda x: '(?m)' + '|'.join(x)})["keywords"].to_dict()
+
+    # process the df_regex on a single SQL, this could exceeds the limits of the max length of SQL statements.
+    df1 = df.select("*", *[ (size(split(upper(col('address')), v))-1).alias(k) for k,v in df_ptn.items() ])
+    +--------------------+----+---+---+---+
+    |             address|name| CA| NL| US|
+    +--------------------+----+---+---+---+
+    |3030 Whispering P...|John|  0|  0|  3|
+    |Kalverstraat Amst...|Mary|  0|  1|  1|
+    |Kalverstraat Amst...| Lex|  0|  2|  1|
+    |                xvcv| ddd|  0|  0|  0|
+    +--------------------+----+---+---+---+
+
+    df_new = df1.select(
+        *df.columns, 
+        flatten(array(*[ expr("array_repeat('{0}',`{0}`)".format(c)) for c in df_ptn.keys() ])).alias('iso2')
+    )
+    df_new.show()                                                                                                      
+    +--------------------+----+------------+
+    |             address|name|        iso2|
+    +--------------------+----+------------+
+    |3030 Whispering P...|John|[US, US, US]|
+    |Kalverstraat Amst...|Mary|    [NL, US]|
+    |Kalverstraat Amst...| Lex|[NL, NL, US]|
+    |                xvcv| ddd|          []|
+    +--------------------+----+------------+
+
+    Note: another idea from @CronosNull to split the SQL on their own keys, more practical than doing it on a single SQL.
+
+        cols = df.columns
+
+        # df = df.withColumn() are on their onw SQL parsing
+        for k,v in df_ptn.items():
+          df = df.withColumn(k, size(split(upper(col('address')), v))-1)
+
+        df_new = df.select(
+            *cols, 
+            flatten(array(*[ expr("array_repeat('{0}',`{0}`)".format(c)) for c in df_ptn.keys() ])).alias('iso2')
+        )
+
+
+  Method-2: merge the above two in one steps. notice how the backslashes are escaped by `replace('\\', '\\\\')`:
+
+    df_ptn1 = df_regex.groupby('iso2') \
+        .agg({'keywords':lambda x: '(?m)' + '|'.join(x).replace('\\', '\\\\')})["keywords"] \
+        .to_dict()
+
+    df_new = df.select(
+        *df.columns, 
+        flatten(array(*[ expr("array_repeat('{0}', size(split(upper(address), '{1}'))-1)".format(k,v)) for k,v in df_ptn1.items() ])).alias('iso2')
+    )
+    df_new.show()
+    +--------------------+----+------------+
+    |             address|name|        iso2|
+    +--------------------+----+------------+
+    |3030 Whispering P...|John|[US, US, US]|
+    |Kalverstraat Amst...|Mary|    [NL, US]|
+    |Kalverstraat Amst...| Lex|[NL, NL, US]|
+    |                xvcv| ddd|          []|
+    +--------------------+----+------------+
+
+Some notes:
+ (1) between an UDF and non-UDF solution like groupby + join, the later won't always win, especially when the join'ed dataframe is not as large that involves data saved in a distributed system. be careful when provide a non-UDF solution which is using join or groupby.
+
+ (2) multiple withColumn() on the same df assignment should be functional like CTEs, 
+
+     df.withColumn('a', func1()).withColumn('b', func2())                 <-- one SQL with two CTEs
+     df = df.withColumn('a', func1()); df = df.withColumn('b', func2())   <-- two SQLs
+
+   the parsing of the SQLs could be very different.
+
+ (3) for regex variable to work in SparkSQL, need to escape backslash, do the following:
+
+     ptn.replace('\\', '\\\\')
+
