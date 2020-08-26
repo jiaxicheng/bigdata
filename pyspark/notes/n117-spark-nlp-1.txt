@@ -1,0 +1,86 @@
+Spark NLP: Natural Language Processing 
+https://nlp.johnsnowlabs.com/
+
+---
+Notes:
+(1) install spark-nlp package
+
+    pip3 install spark-nlp==2.5.5
+
+(2) run with pyspark
+
+    pyspark --packages com.johnsnowlabs.nlp:spark-nlp_2.11:2.5.5
+
+(3) manually download Pipelines modules and the load into pyspark for sparknlp tasks
+
+  https://github.com/JohnSnowLabs/spark-nlp-models
+
+  Step-1: download recognize_entities_dl
+  ---
+
+    mkdir my_folder && cd my_folder
+    wget https://s3.amazonaws.com/auxdata.johnsnowlabs.com/public/models/recognize_entities_dl_en_2.4.3_2.4_1584626752821.zip
+
+  Step-2: unzip file, will create two sub-folders: metadata + stages
+  ---
+
+    unzip models/recognize_entities_dl_en_2.4.3_2.4_1584626752821.zip
+
+  Step-3: upload my_folder to the shared data storage: hdfs, aws s3 etc
+  ---
+
+    rm -f recognize_entities_dl_en_2.4.3_2.4_1584626752821.zip && cd ..
+    hdfs dfs -copyFromLocal ./my_folder hdfs://path/to/
+
+  Step-4: under pyspark:
+  ---
+
+    from sparknlp.pretrained import PretrainedPipeline
+    pipeline = PretrainedPipeline.from_disk("hdfs://path/to/my_folder")
+
+
+References::
+[1] list of all POS tags: https://github.com/JohnSnowLabs/spark-nlp/releases/tag/2.4.0
+[2] https://www.ling.upenn.edu/courses/Fall_2003/ling001/penn_treebank_pos.html
+[3] https://stackoverflow.com/questions/58522742/unable-to-download-the-pipeline-provided-by-spark-nlp-library
+
+
+---
+Example-1: find all nouns and adjectives of a StringType column containing texts
+  REF: https://stackoverflow.com/questions/63572775
+  Method: Using one of the pretrained English - Pipelines: `explain_document_dl`
+
+    from sparknlp.pretrained import PretrainedPipeline
+
+    df = spark.read.csv("/home/xicheng/test/pandas-9.txt", header=True) 
+    df1 = df.withColumnRenamed('review', 'text')
+
+    pipeline_dl = PretrainedPipeline('explain_document_dl', lang='en')
+
+    result = pipeline_dl.transform(df1)
+
+    result.selectExpr(
+      *df1.columns, 
+      'transform(filter(pos, p -> p.result rlike "(?:NN|JJ)"), x -> x.metadata.word) as words'
+    ).show(10,0)                                                                                                    
+    +-----+-----+----+------------+----+------------------------------------------------+----------------------------+
+    |years|month|u_id|rating_score|p_id|text                                            |words                       |
+    +-----+-----+----+------------+----+------------------------------------------------+----------------------------+
+    |2010 |09   |tvwe|1           |p_5 |I do not like it because its size is not for me.|[size]                      |
+    |2011 |11   |frsa|1           |p_7 |I am allergic to the peanut elements.           |[allergic, peanut, elements]|
+    |2015 |5    |ybfd|1           |p_2 |It is a repeated one, please no more.           |[more]                      |
+    |2016 |7    |tbfb|2           |p_2 |It is not good for my oil hair.                 |[good, oil, hair]           |
+    +-----+-----+----+------------+----+------------------------------------------------+----------------------------+
+
+  Note: POS taglist from https://www.ling.upenn.edu/courses/Fall_2003/ling001/penn_treebank_pos.html
+  where the regex pattern `^(?:NN|JJ)` matches the following:
+  ---
+   NN   -> Noun, singular or mass
+   NNS  -> Noun, plural
+   NNP  -> Proper noun, singular
+   NNPS -> Proper noun, plural
+   JJ   -> Adjective
+   JJR  -> Adjective, comparative
+   JJS  -> Adjective, superlative
+
+
