@@ -275,4 +275,62 @@ Spark SQL higher-order functions:
         .withColumn("cur_idx", expr("array_position(vals, struct(date,col1,col2))-1")) \
         .selectExpr(*TEST_df.columns, "IF(cur_idx<idx, 0, vals[idx-offset].col2 + offset + cur_idx - idx) as want") 
 
+  Notes:
+   (1) using *TEST_df.columns will yield error if any column name contains special characters like SPACE, dot etc. 
+     use one of the followings to enclose column name with backticks instead:
+     
+         *[f"`{}`" for c in TEST_df.colmns]
+         *map(lambda c: f"`{c}`", TEST_df.columns)
+
+
+
+(34) Use aggregate function to increment timestamp containing microsecond. 
+  REF: https://stackoverflow.com/questions/63600934/pyspark-insert-rows-with-specific-timestamp-into-dataframe
+  Target: add 3 extra rows for each existing row and increment a timestamp column with 
+      microsecond by 5 seconds and set value to NULL
+  Method: cast using timestamp() can keep the microsecond, 
+          interval N second can also keep microsecond, but N must be a constant (column not allowed)
+
+    df = spark.createDataFrame([
+        ('id1', '2020-02-22 04:57:36.843', 1.4), 
+        ('id2', '2020-02-22 04:57:50.850', 1.7), 
+        ('id3', '2020-02-22 04:57:22.133', 1.2) 
+    ], schema='id string, time string, value double') 
+
+    df = df.withColumn('time', df['time'].astype('timestamp'))
+    #DataFrame[id: string, time: timestamp, Value: double]
+
+    df.selectExpr(
+        "id", 
+        """
+          inline_outer(
+            aggregate(
+              /* */
+              sequence(1,3), 
+              /* zero_value: array of structs with first item having time/value on the current row */
+              array((time, value)),
+              /* merge: for sequence 1 to 3, append an array of struct having time 5 second from the 
+                 time of the last item in existing acc array and set the corresponding value to NULL */
+              (acc, x) -> concat(acc, array((element_at(acc,-1).time + interval 5 seconds as time, NULL as value)))
+            )
+          )
+        """
+    ).show(truncate=False)
+    +---+-----------------------+-----+
+    |id |time                   |value|
+    +---+-----------------------+-----+
+    |id1|2020-02-22 04:57:36.843|1.4  |
+    |id1|2020-02-22 04:57:41.843|null |
+    |id1|2020-02-22 04:57:46.843|null |
+    |id1|2020-02-22 04:57:51.843|null |
+    |id2|2020-02-22 04:57:50.85 |1.7  |
+    |id2|2020-02-22 04:57:55.85 |null |
+    |id2|2020-02-22 04:58:00.85 |null |
+    |id2|2020-02-22 04:58:05.85 |null |
+    |id3|2020-02-22 04:57:22.133|1.2  |
+    |id3|2020-02-22 04:57:27.133|null |
+    |id3|2020-02-22 04:57:32.133|null |
+    |id3|2020-02-22 04:57:37.133|null |
+    +---+-----------------------+-----+
+
 
