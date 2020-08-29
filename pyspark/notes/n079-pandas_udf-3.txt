@@ -94,7 +94,7 @@ Code:
       cols = pdf.columns[2:]
       n = pdf.shape[0]
       n1 = pdf.iloc[:,2:].fillna(0).values
-      _, idx = linear_sum_assignment(np.vstack((n1,np.zeros((N-n,N)))))
+      _, idx = linear_sum_assignment(np.vstack((n1,np.zeros((sz-n,sz)))))
       return pdf.assign(assigned=[cols[i] for i in idx][:n])
 
 
@@ -270,3 +270,43 @@ Example-8: use pandas_udf with broadcast variable
     +--------------------+----+------------+
 
 
+
+Example-9: use reverse_geocoder to find City name from lat+long
+  REF: https://stackoverflow.com/questions/63633808/finding-state-name-from-latlong-in-pysaprk-and-scala
+  Method: require a external Python model `reverse_geocoder`, ideal for pandas_udf
+  Code:
+
+    from pyspark.sql.functions import pandas_udf, PandasUDFType
+    import reverse_geocoder as rg
+    from pandas import Series
+
+    df = spark.createDataFrame([
+        (712,[30.60422, -98.39]),
+        (714,[37.28816, -121.9]),
+        (713,[37.31304, -121.9])
+    ], ['id', 'latlong'])
+
+    @pandas_udf("string", PandasUDFType.SCALAR)
+    def get_state_name(latlon):
+      return Series([ e["admin1"] for e in rg.search([*map(tuple,latlon)]) ])
+
+    df.withColumn('state', get_state_name('latlong')).show()
+    +---+------------------+----------+
+    | id|           latlong|     state|
+    +---+------------------+----------+
+    |712|[30.60422, -98.39]|     Texas|
+    |714|[37.28816, -121.9]|California|
+    |713|[37.31304, -121.9]|California|
+    +---+------------------+----------+
+
+  Note: `rg.search()` takes a tuple or list of tuples as argument. when the ArrayType column as input of pandas_udf
+        we need to map the array into tuple and then retrieve the key "admin1" from the resulting list of OrderedDict's
+        see below for an example:
+
+        [OrderedDict([('lat', '30.58908'),
+                      ('lon', '-98.38392'),
+                      ('name', 'Granite Shoals'),
+                      ('admin1', 'Texas'),
+                      ('admin2', 'Burnet County'),
+                      ('cc', 'US')])]
+ 
