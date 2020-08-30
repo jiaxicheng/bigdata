@@ -269,6 +269,23 @@ Example-8: use pandas_udf with broadcast variable
     |                xvcv| ddd|          []|
     +--------------------+----+------------+
 
+  To find unique contries:
+
+    def __get_iso2_3(addr, ptn):
+      return Series([ [k for k,v in ptn.value.items() if re.search(v,s)] for s in addr ])
+
+    get_iso2_1 = pandas_udf(lambda x:__get_iso2_3(x, df_ptn), "array<string>", PandasUDFType.SCALAR) 
+
+    df.withColumn('iso2', get_iso2_1(expr("upper(address)"))).show()
+    +--------------------+----+--------+
+    |             address|name|    iso2|
+    +--------------------+----+--------+
+    |3030 Whispering P...|John|    [US]|
+    |Kalverstraat Amst...|Mary|[NL, US]|
+    |Kalverstraat Amst...| Lex|[NL, US]|
+    |                xvcv| ddd|      []|
+    +--------------------+----+--------+
+
 
 
 Example-9: use reverse_geocoder to find City name from lat+long
