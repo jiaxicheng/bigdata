@@ -327,3 +327,40 @@ Example-9: use reverse_geocoder to find City name from lat+long
                       ('admin2', 'Burnet County'),
                       ('cc', 'US')])]
  
+
+
+Example-10: decode lat/long from polyline encoded text column:
+  REF: https://stackoverflow.com/questions/63670324/pandas-udf-giving-error-related-to-pyarrow
+
+    from pyspark.sql.functions import udf, pandas_udf
+    import polyline
+    from pandas import Series
+
+    df = spark.createDataFrame([(1, (38.5, -120.2)),(2,(40.7, -120.9)), (3,(43.2, -126.4))],['id', 'latlon'])
+
+    # polyline.encode takes a list of tuple, a pd.Series as input
+    geoloc_encode = udf(lambda x: polyline.encode([x]))
+    
+    # polyline.decode takes string as input and a list of tuple as output
+    lat_lang_udf = pandas_udf(lambda x: Series([polyline.decode(s)[0] for s in x]), "array<double>")
+
+    df.withColumn('geoloc', geoloc_encode('latlon')).withColumn('lat_long', lat_lang_udf('geoloc')).show()
+    +---+--------------+----------+--------------+
+    | id|        latlon|    geoloc|      lat_long|
+    +---+--------------+----------+--------------+
+    |  1|[38.5, -120.2]|_p~iF~ps|U|[38.5, -120.2]|
+    |  2|[40.7, -120.9]|_flwF~g|`V|[40.7, -120.9]|
+    |  3|[43.2, -126.4]|_otfG~nnbW|[43.2, -126.4]|
+    +---+--------------+----------+--------------+
+
+  Some example use of polyline:
+
+    s = Series([(38.5, -120.2), (40.7, -120.9), (43.2, -126.4)])
+    polyline.encode(s)
+    #'_p~iF~ps|U_ulL~ugC_hgN~eq`@'
+
+    polyline.decode('_p~iF~ps|U_ulL~ugC_hgN~eq`@')
+    #[(38.5, -120.2), (40.7, -120.9), (43.2, -126.4)]
+
+
+
