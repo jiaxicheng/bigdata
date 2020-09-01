@@ -364,3 +364,44 @@ Example-10: decode lat/long from polyline encoded text column:
 
 
 
+
+Example-11: use pandas_udf and spacy to find 'PERSON' or "ORG" of a name
+  REF: https://stackoverflow.com/questions/63681625/using-spacy-with-pandas-udf-pyspark-error-i-cant-fix
+
+    df = spark.createDataFrame([
+      ['John Doe'],
+      ['Jane Doe'],
+      ['Microsoft Corporation'],
+      ['Apple Inc.']
+    ]).toDF("name",)
+
+
+    from pandas import Series
+    from pyspark.sql.functions import pandas_udf
+
+    def __get_entities(x: Series) -> Series:
+      import spacy
+      nlp = spacy.load("en_core_web_lg")
+      return Series([ [e.label_ for e in nlp(s).ents if e.label_ in ('PERSON','ORG')] for s in x])
+
+    get_entities = pandas_udf(__get_entities, "array<string>")
+
+    df.withColumn('dt', get_entities('name')).show(truncate=False)
+    +---------------------+--------+                                                
+    |name                 |dt      |
+    +---------------------+--------+
+    |John Doe             |[PERSON]|
+    |Jane Doe             |[PERSON]|
+    |Microsoft Corporation|[ORG]   |
+    |Apple Inc.           |[ORG]   |
+    +---------------------+--------+
+
+  Notes:
+   (1) Python modules to be installed:
+
+        pip3 install -U spacy
+        python -m spacy download en_core_web_lg
+        
+   (2) this is one case when package should be imported and loaded locally on executers, there is no
+       point to load them on driver and then broadcast to workers.
+
