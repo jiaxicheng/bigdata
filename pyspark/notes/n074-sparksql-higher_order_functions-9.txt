@@ -334,3 +334,75 @@ Spark SQL higher-order functions:
     +---+-----------------------+-----+
 
 
+
+(35) aggregate set zero_value using the first array item and then iterate from the 2nd to the last:
+  REF: https://stackoverflow.com/questions/63739214
+  Benefit: no need to do type-casting when setting zero_value
+
+    df = spark.createDataFrame([
+        ('12345', 'India', 'China', '2020-10-10', '20') 
+      , ('12345', 'India', 'China', '2020-10-10', '30') 
+      , ('12345', 'India', 'China', '2020-10-12', '10') 
+      , ('12345', 'India', 'China', '2020-10-25', '20') 
+      , ('12345', 'India', 'China', '2020-10-26', '10') 
+      , ('12346', 'India', 'China', '2020-10-15', '20') 
+      , ('12346', 'Nepal', 'China', '2020-10-16', '20') 
+      , ('12346', 'India', 'China', '2020-10-17', '50') 
+      , ('12347', 'India', 'China', '2020-10-18', '20') 
+      , ('12347', 'Nepal', 'China', '2020-10-19', '21') 
+    ], ['container_no', 'origin', 'destination', 'shipment_dt', 'volume'])
+
+    df.createOrReplaceTempView("Input_DF")
+
+    spark.sql("""
+
+      WITH t1 as (
+          select container_no, 
+                 array_sort(collect_list(struct(shipment_dt, volume, origin, destination))) as dta
+          FROM Input_DF
+          GROUP BY container_no
+      )
+      SELECT container_no,
+        inline_outer(
+          aggregate(
+            /* iterate through array dta(through below `x`) from the 2nd item to the last item */
+            slice(dta,2,size(dta)),
+            /* set zero_value as array of structs array<struct<dta:struct<...>,start_dt:date>>
+             * and initialize it with dta[0] and its shipment_dt as start_dt
+             */
+            array((dta[0] as dta, dta[0].shipment_dt as start_dt)),
+            /* merge: if x.shipment_at is within 10 days of the start_at from the last item of acc,
+             * then update dta of the last item of acc and keep its original start_at
+             * otherwise, added a new item `(x as dta, x.shipment_dt as start_dt)` to acc 
+             */
+            (acc, x) -> 
+              IF(x.shipment_dt <= element_at(acc,-1).start_dt + INTERVAL 10 days,
+                 concat(
+                   slice(acc,1,size(acc)-1), 
+                   array((
+                     IF(element_at(acc,-1).dta.volume > x.volume, element_at(acc,-1).dta, x) as dta,
+                     element_at(acc,-1).start_dt as start_dt
+                   ))
+                 ),
+                 concat(acc, array((x as dta, x.shipment_dt as start_dt)))
+              ),
+            /* finish: retrieve only the dta field of acc */
+            acc -> transform(acc, x -> x.dta)
+          )
+        )
+      FROM t1
+
+    """).orderBy('container_no','shipment_dt').show()
+    +------------+-----------+------+------+-----------+                            
+    |container_no|shipment_dt|volume|origin|destination|
+    +------------+-----------+------+------+-----------+
+    |       12345| 2020-10-10|    30| India|      China|
+    |       12345| 2020-10-25|    20| India|      China|
+    |       12346| 2020-10-17|    50| India|      China|
+    |       12347| 2020-10-19|    21| Nepal|      China|
+    +------------+-----------+------+------+-----------+
+
+    
+
+
+
