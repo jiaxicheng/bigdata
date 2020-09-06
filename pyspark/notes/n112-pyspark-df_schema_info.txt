@@ -60,6 +60,12 @@ Notes:
         StructType:    mystruct struct<f1:string,f2:int>
    
         CREATE TABLE my_tbl (myarr array<string>, mymap map<string,int>, mystruct struct<f1:string,f2:int>);
+
+ (6) For machine-learning projects, the name of features are saved in the training_df.schema as 'metadata'. you can
+     find this info by:
+        
+        training_df.select('features').schema.jsonValue()['fields'][0]['metadata']['ml_attr']['attrs']['numeric']
+
  
 #####
 data structs used in df.schema.jsonValue():
@@ -222,5 +228,32 @@ Example-6: use the existing df.schema to assign another df's schema with some ex
     # correct method is as following: 
     # create a new schema from existing f.schema.jsonValue(), then add new fields.
     schema = StructType.fromJson(df.schema.jsonValue()).add('cs', 'double')
+
+
+Example-7: use df.dtypes and DDL-formated schema
+
+    # added new_cols
+    new_cols = [ ("col1", "float"), ("col2", "int") ]
+    
+    # set up DDL-formated schema with 2 new columns to the existing df
+    schema = ','.join(f'{c} {d}' for c,d in df.dtypes + new_cols)
+
+    #create a empty dataframe: 
+    df1 = spark.createDataFrame([],schema=schema)
+
+    
+Example-8: use type-casting to adjust field name and/or field datatype
+
+  Note: change `int_value` field under event_params column from `bigint` to `string`. 
+  the same method applied to: (1) change field_name, (2) change field data type, see example-4.
+  Not applied to: remove/add a field
+
+    df                                                                                                                 
+    #DataFrame[col2: bigint, event_params: array<struct<key:string,value:struct<int_value:bigint,string_value:string>>>]
+
+    # retrieve dtype of `event_params` and do string replacement
+    dtype = dict(df.dtypes)["event_params"].replace('int_value:bigint','int_value:string')
+
+    df.withColumn('event_params', df["event_params"].cast(dtype))
 
 
