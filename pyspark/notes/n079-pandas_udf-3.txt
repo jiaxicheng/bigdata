@@ -405,3 +405,49 @@ Example-11: use pandas_udf and spacy to find 'PERSON' or "ORG" of a name
    (2) this is one case when package should be imported and loaded locally on executers, there is no
        point to load them on driver and then broadcast to workers.
 
+
+
+Example-12: sorting by one column only, other columns keep original order:
+  REF: https://stackoverflow.com/questions/63775680
+  Method: use pandas_udf to set up the new column, notice to do pdf.sort_values(['time']) as
+     rows after groupby is nondeterministic.
+
+    df = spark.createDataFrame([ 
+          ('123456', 2, 'A'), ('123457', 4, 'B'), ('123458', 7, 'C') 
+        , ('123459', 5, 'D'), ('123460', 3, 'E'), ('123461', 1, 'F') 
+        , ('123462', 9, 'G'), ('123463', 8, 'H'), ('123464', 6, 'I') 
+    ], ['time', 'col1', 'col2']) 
+
+    from pyspark.sql.functions import pandas_udf, PandasUDFType
+    from pyspark.sql.types import StructType
+
+    schema = StructType.fromJson(df.schema.jsonValue()).add('col1_sorted', 'integer')
+
+    @pandas_udf(schema, PandasUDFType.GROUPED_MAP)
+    def get_col1_sorted(pdf):
+      return pdf.sort_values(['time']).assign(col1_sorted=sorted(pdf["col1"]))
+
+    df.groupby().apply(get_col1_sorted).show()
+    +------+----+----+-----------+
+    |  time|col1|col2|col1_sorted|
+    +------+----+----+-----------+
+    |123456|   2|   A|          1|
+    |123457|   4|   B|          2|
+    |123458|   7|   C|          3|
+    |123459|   5|   D|          4|
+    |123460|   3|   E|          5|
+    |123461|   1|   F|          6|
+    |123462|   9|   G|          7|
+    |123463|   8|   H|          8|
+    |123464|   6|   I|          9|
+    +------+----+----+-----------+
+
+  An alternative using higher order functions:
+
+    df_new = df \
+        .groupby() \
+        .agg(expr("array_sort(collect_list(struct(time,col1,col2))) as data")) \
+        .withColumn('col1_sorted', expr("array_sort(transform(data, x -> x.col1))")) \
+        .selectExpr("inline(arrays_zip(data,col1_sorted))") \
+        .select('data.*', 'col1_sorted') 
+
