@@ -123,7 +123,7 @@ Spark SQL higher-order functions:
 
     df3 = df2.selectExpr(
         *cols, 
-        f"array_max(filter(array({','.join(map('`{}`'.format,d.keys()))}), x -> x.has_match)).topic as topic"
+        f"array_max(filter(array({'`{}`'.format('`,`',join(d.keys()))}), x -> x.has_match)).topic as topic1"
     )
     df3.show()
     +----+--------------------+-----+
@@ -133,3 +133,34 @@ Spark SQL higher-order functions:
     |   1|[background, the ...|    1|
     |   2|[objective, patte...|    0|
     +----+--------------------+-----+
+
+
+
+(37) split a large Map field by max N keys
+  REF: https://stackoverflow.com/questions/63856354
+  Method: use transform to convert map into ceil(size(map)/N), then explode
+  Code:
+
+    df = spark.createDataFrame([
+       ('A', {1:100, 2:200, 3:100}),
+       ('B', {4:300, 1:500, 9:300, 11:900, 5:900, 6: 111, 7: 222, 8: 333, 12: 444, 13:555, 19:666}),
+       ('C', {6:100, 4:200, 7:100, 8:200, 5:800})
+    ], ["id", "map1"])
+
+    sql_expr = lambda N: f"""
+      explode(transform( 
+        sequence(1,ceil(size(map1)/{N})), 
+        i -> map_from_entries(transform(slice(map_keys(map1),i*{N}-{N}+1,{N}), k -> (k, map1[k])))  
+      )) as map1"""
+
+    df.selectExpr("id", sql_expr(5)).show(10,0) 
+    +---+----------------------------------------------------+
+    |id |col                                                 |
+    +---+----------------------------------------------------+
+    |A  |[1 -> 100, 2 -> 200, 3 -> 100]                      |
+    |B  |[1 -> 500, 19 -> 666, 4 -> 300, 5 -> 900, 6 -> 111] |
+    |B  |[7 -> 222, 8 -> 333, 9 -> 300, 11 -> 900, 12 -> 444]|
+    |B  |[13 -> 555]                                         |
+    |C  |[8 -> 200, 4 -> 200, 5 -> 800, 6 -> 100, 7 -> 100]  |
+    +---+----------------------------------------------------+
+
