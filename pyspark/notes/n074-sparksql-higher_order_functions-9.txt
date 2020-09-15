@@ -240,13 +240,11 @@ Spark SQL higher-order functions:
         .selectExpr("""
            inline(
              transform(vals, (x,i) -> named_struct(
-                 'date', x.date, 
-                 'col1', x.col1, 
-                 'col2', x.col2, 
+                 'dta', x, 
                  'want', IF(i<idx, 0, vals[idx-offset].col2 + offset + i - idx)
                )
              )
-        )""")
+        )""").select("dta.*", "want")
     df_new.orderBy('date').show()
     +----------+----+----+----+                                                     
     |      date|col1|col2|want|

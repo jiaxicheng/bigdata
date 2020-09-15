@@ -161,6 +161,35 @@ Spark SQL higher-order functions:
        |John|[[salad, 1], [burger, 2]]|
        +----+-------------------------+
 
+(14.2) Another similar example finding most frequent element in an ArrayType column: 
+  REF: https://stackoverflow.com/questions/63904438/pyspark-column-value-is-a-list-of-string
+  Method: 
+    1. use array_distinct to find distinct elements in array `values`
+    2. use transform to convert (1) to array of structs with two fields: cnt and val
+       where cnt is calculated by size + filter and val is the element value in (1)
+    3. take the array_max of (2) and its `val` field
+
+  Code:
+
+    df = spark.createDataFrame([
+       (1,['good','good','good','bad','bad','good','good']),
+       (2,['bad','badd','good','bad',Null,'good','bad'])
+    ], ['id', 'values'])
+
+    df.selectExpr("*", """
+        array_max(
+          transform(
+            array_distinct(values), x-> (size(filter(values, y -> y=x)) as cnt, x as val)
+          )
+        ).val as most_frequent
+    """).show(2,60)
+    +---+----------------------------------------+-------------+
+    | id|                                  values|most_frequent|
+    +---+----------------------------------------+-------------+
+    |  1|[good, good, good, bad, bad, good, good]|         good|
+    |  2|      [bad, badd, good, bad,, good, bad]|          bad|
+    +---+----------------------------------------+-------------+
+    
 
 
 (15) transform + filter to find the first non-null values in a embedded struct/array
@@ -168,7 +197,7 @@ Spark SQL higher-order functions:
     REF: https://stackoverflow.com/questions/59316791/json-iteration-in-spark
     Find the first non-null value in a array fields using transform + filter SQL using LATERAL VIEW + inline function
 
-    Scala version:
+    Spark version 2.4+:
     
     val df = spark.read.option("multiLine","true").json("/home/xicheng/test/json-6.txt")
     
