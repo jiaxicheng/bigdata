@@ -1,0 +1,131 @@
+Continue..
+
+pandas_udf and related applications:
+---
+
+Example-13: evaluate functions in a column using values from another dataframe
+  REF:https://stackoverflow.com/questions/63868572/pyspark-evaluate-formula
+
+  Step-0: setup two dataframes:
+
+    from pyspark.sql.functions import expr, pandas_udf
+    from pandas import Series
+    import re
+
+    df = spark.createDataFrame([
+       (1,"(a/(b+c.12))*100"),(2,"m/n*100"),(3,"d"),(4,"max([a,b,12])"),(5,"a>b"), 
+       (6,"2*sin(pi/2)"), (7, "date_add('h',2)")
+    ],["ID", "Formula"])
+
+    df_val = spark.createDataFrame([("a","4"),("b","3"),("c.12","8"),("d","7"),("m","2"),("n","5"),("h","2020-09-01")], ["ID", "Value"])
+
+
+    df = spark.createDataFrame([
+        (1,"(a/(b+c.12))*100"),(2,"m/n*100"),(3,"d"),(4,"2*sin(pi/2)"),(5,"exp(c.12)")
+    ],["ID","Formula"])
+
+    df_val = spark.createDataFrame([("a",4),("b",3),("c.12",8),("d",7),("m",2),("n",5)],["ID", "Value"])
+
+  Step-1: tokenize df.Formula
+    # convert all dot preceded by a letter to underscore, then split the string with non-words 
+    # remove NULL and EMPTY elements from the resulting array `tokens`
+
+    df1 = df.withColumn('Formula_tmp', expr("regexp_replace(Formula, '(?<=[A-Za-z])\\\.', '_')")) \
+        .selectExpr("*", "filter(split(Formula_tmp,'\\\W+'), x -> nullif(x,'') is not NULL) as tokens")
+    +---+----------------+----------------+-----------------+
+    | ID|         Formula|     Formula_tmp|           tokens|
+    +---+----------------+----------------+-----------------+
+    |  1|(a/(b+c.12))*100|(a/(b+c_12))*100|[a, b, c_12, 100]|
+    |  2|         m/n*100|         m/n*100|      [m, n, 100]|
+    |  3|               d|               d|              [d]|
+    |  4|   max([a,b,12])|   max([a,b,12])|  [max, a, b, 12]|
+    |  5|             a>b|             a>b|           [a, b]|
+    |  6|     2*sin(pi/2)|     2*sin(pi/2)|  [2, sin, pi, 2]|
+    |  7| date_add('h',2)| date_add('h',2)| [date_add, h, 2]|
+    +---+----------------+----------------+-----------------+
+
+
+  Step-2: left-join with df_val and find all ID/Value that are used in Formula and make them a Map
+    # Note: for df_val.Formula, convert all dot preceded by a letter to underscore, rename it to `var`
+
+    df2 = df1.join(
+      df_val.withColumn("ID", expr("regexp_replace(ID, '(?<=[A-Za-z])\\\.', '_')")).withColumnRenamed("ID", "var"), 
+      expr("array_contains(tokens, var)"), 
+      "left"
+    ).groupby("ID").agg( 
+      expr('first(Formula) as Formula'), 
+      expr('first(Formula_tmp) as Formula_tmp'), 
+      expr('collect_list(array(var, string(Value))) as map1')
+    )
+
+    df2.show(truncate=False)
+    +---+----------------+----------------+---------------------------+             
+    |ID |Formula         |Formula_tmp     |map1                       |
+    +---+----------------+----------------+---------------------------+
+    |7  |date_add('h',2) |date_add('h',2) |[[h, 2020-09-01]]          |
+    |6  |2*sin(pi/2)     |2*sin(pi/2)     |[[,]]                      |
+    |5  |a>b             |a>b             |[[a, 4], [b, 3]]           |
+    |1  |(a/(b+c.12))*100|(a/(b+c_12))*100|[[a, 4], [b, 3], [c_12, 8]]|
+    |3  |d               |d               |[[d, 7]]                   |
+    |2  |m/n*100         |m/n*100         |[[m, 2], [n, 5]]           |
+    |4  |max([a,b,12])   |max([a,b,12])   |[[a, 4], [b, 3]]           |
+    +---+----------------+----------------+---------------------------+
+
+  Step-3: create a pandas_udf to `eval()` Formula
+
+    @pandas_udf("string") 
+    def eval_formula(formula, aoa): 
+      from math import sin, pi, exp 
+      from datetime import datetime, timedelta
+      date_add = lambda x,y: (datetime.fromisoformat(x) + timedelta(days=y)).strftime("%Y-%m-%d")
+      s = [] 
+      for f,a in zip(formula, aoa): 
+        d = dict(a) 
+        try: 
+          s.append(str(eval(re.sub(r'\w+', lambda m: str(d.get(m.group(0),m.group(0))), f)))) 
+        except Exception as e: 
+          s.append(str(e)) 
+      return Series(s) 
+
+  Step-4: run the pandas_udf function
+
+    df2.withColumn('result', eval_formula('Formula_tmp', 'map1')) \
+        .drop('Formula_tmp') \
+        .show(truncate=False)
+    +---+----------------+---------------------------+-----------------+            
+    |ID |Formula         |map1                       |result           |
+    +---+----------------+---------------------------+-----------------+
+    |7  |date_add('h',2) |[[h, 2020-09-01]]          |2020-09-03       |
+    |6  |2*sin(pi/2)     |[[,]]                      |2.0              |
+    |5  |a>b             |[[a, 4], [b, 3]]           |True             |
+    |1  |(a/(b+c.12))*100|[[a, 4], [b, 3], [c_12, 8]]|36.36363636363637|
+    |3  |d               |[[d, 7]]                   |7                |
+    |2  |m/n*100         |[[m, 2], [n, 5]]           |40.0             |
+    |4  |max([a,b,12])   |[[a, 4], [b, 3]]           |12               |
+    +---+----------------+---------------------------+-----------------+
+
+  Notes: 
+   (1) all functions used in Formula must be imported from or defined inside the pandas_udf (when import from the 
+       main program it yields NameError). the same situation applied also to udf funciton and rdd.map
+       and rdd.mapPartitions methods.
+        +---+----------------+---------------------------+------------------------------+
+        |ID |Formula         |map1                       |result                        |
+        +---+----------------+---------------------------+------------------------------+
+        |7  |date_add('h',2) |[[h, 2020-09-01]]          |name 'date_add' is not defined|
+        |6  |2*sin(pi/2)     |[[,]]                      |name 'sin' is not defined     |
+        |5  |a>b             |[[a, 4], [b, 3]]           |True                          |
+        |1  |(a/(b+c.12))*100|[[a, 4], [b, 3], [c_12, 8]]|36.36363636363637             |
+        |3  |d               |[[d, 7]]                   |7                             |
+        |2  |m/n*100         |[[m, 2], [n, 5]]           |40.0                          |
+        |4  |max([a,b,12])   |[[a, 4], [b, 3]]           |12                            |
+        +---+----------------+---------------------------+------------------------------+
+
+   (2) force the return type to be str() or it yields `pyarrow.lib.ArrowInvalid:` Error. using string as return type
+       if more flexible so to capture the Exception message, use astype("decimal(10,2)") after running the 
+       pandas_udf function
+
+   (3) map1 used in pandas_udf function is an array of arrays, MapType is not allowed in pandas_udf both input argument
+       and return values. there is an array element of `[,]` which has NULL var, to skip this element use nvl2 function:
+       `nvl2(var,array(var, string(Value)),null)` to replace `array(var, string(Value))`
+
+
