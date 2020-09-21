@@ -50,7 +50,7 @@ Interesting topic on INET and subnet
       - ip: a column containing IPv4 address in the standard numbers-and-dots notation
       return: LongType
       """
-      return expr(f"aggregate(zip_with(split({ip}, '[.]'), array(16777216L, 65536L, 256L, 1L), (x,y) -> bigint(x)*y), 0L, (x,y) -> x+y)")
+      return expr(f"aggregate(zip_with(split({ip}, '[.]'), sequence(24,0,-8), (x,y) -> bigint(x)*shiftleft(1,y)), 0L, (x,y) -> x+y)")
 
     # from a bigint to ip_addr
     def inet_ntoa(num):
@@ -58,7 +58,7 @@ Interesting topic on INET and subnet
       - num: a bigint
       return: StringType IPv4 address in the standard numbers-and-dots notation
       """
-      return expr(f"array_join(transform(array(4278190080L, 16711680L, 65280L, 255L), (x,i) -> shiftright(x&{num},8*(3-i))),'.')")
+      return expr(f"array_join(transform(sequence(24,0,-8), x -> shiftright(shiftleft(255,x)&{num},x)),'.')")
 
     # parse number-based ip_addr/net into an array of [ip_addr, size] to the subnet
     # where ip_addr is the number of first ip_add in subnet, size is # of ip_address in the same subnet
@@ -82,4 +82,29 @@ Interesting topic on INET and subnet
 |192.168.1.23/24 |[192.168.1.23, 24] |3232235799|[3232235776, 255]|[3232235776, 3232236031]|[192.168.1.0, 192.168.1.255]  |
 |68.192.173.70/27|[68.192.173.70, 27]|1153477958|[1153477952, 31] |[1153477952, 1153477983]|[68.192.173.64, 68.192.173.95]|
 +----------------+-------------------+----------+-----------------+------------------------+------------------------------+
+
+
+REF: https://stackoverflow.com/questions/63994057
+
+another way to handle inet_ntoa is to use conv refer to: Steven@stackoverflow
+this will not be as performant than the above one though.
+
+    spark.sql("""
+        with t as (
+          select conv(3232235799L,10,16) as h1
+        concat_ws) 
+        select concat_ws('.', 
+          conv(left(h1,2),16,10), 
+          conv(substr(h1,3,2),16,10),
+          conv(substr(h1,5,2),16,10), 
+          conv(right(h1,2),16,10)
+        ) as ip 
+        from t
+    """).show()
+    +------------+
+    |          ip|
+    +------------+
+    |192.168.1.23|
+    +------------+
+
 
