@@ -3,9 +3,21 @@ Using mapping in pyspark:
 discover different ways using maps in pyspark code.
 ---
 Some notes:
- (1) explode('map_col') will add two columns with name `key` and `value`
-     similar to inline(struct_col) in SparkSQL
+ (1) explode('map_col') will add two columns with name `key` and `value`, 
+     SQL syntax: `explode('map_col') as (key_name, value_name)`
 
+ (2) Sort by categories list:  
+    REF: https://stackoverflow.com/questions/62015149
+     
+       categories=['insert', 'seed', 'update', 'snapshot', 'delete']
+       map1 = create_map([ m for i,e in enumerate(categories) for m in [e, lit(i)] ])
+       df.orderBy(map1[col('b')].desc()).show()
+
+ (3) compare two MapType columns, if no duplicate keys exist, then convert to sorted array 
+     of structs and then do comparison:
+
+       sort_array(transform(map_keys(map1), x -> (x, map1[x]))) = sort_array(transform(map_keys(map2), x -> (x, map2[x])))
+ 
 
 
 Example-1: Use Python dict to fillna different value for each column:
