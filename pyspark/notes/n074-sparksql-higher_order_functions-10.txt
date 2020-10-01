@@ -178,3 +178,62 @@ Spark SQL higher-order functions:
     +---+-------------------------------+
 
 
+
+(38) a typical question to use values calculated from the previous Row: y[t+1] = func(y[t], y[t+1])
+  REF: https://stackoverflow.com/questions/64144891
+  Method: 
+   1. use groupby+collect_list+struct and sort_array to create an array of structs
+   2. use arrgregate function. 
+      expr: `slice(dta, 2, size(dta)-1)`
+      start: `array(dta[0])`
+      merge(acc, x): use `concat(acc, array(named_struct(...)))` to update the array of structs `acc`
+                     use x.col1, x.coln to refer to values on the current Row
+                     use element_at(acc, -1).col1, element_at(acc, -1).coln to refer to values on the previous Row
+
+    from pyspark.sql.functions import sort_array, collect_list, struct
+
+    df1 = spark.createDataFrame([
+        ('2020-08-01',0,'M1',3,3,2),('2020-08-02',0,'M1',2,3,1),('2020-08-03',0,'M1',3,3,3),
+        ('2020-08-04',0,'M1',3,3,1),('2020-08-01',0,'M2',1,3,1),('2020-08-02',0,'M2',-1,3,2)
+    ], ["Date", "col1", "id", "col2", "col3", "coln"])
+
+    cols = ['Date', 'col1', 'col2', 'col3', 'coln']
+
+    df_new = df1.groupby('id') \
+        .agg(sort_array(collect_list(struct(*cols))).alias('dta')) \
+        .selectExpr("id", """  
+          inline( 
+            aggregate( 
+              /* expr: iterate through the array `dta` from the 2nd to the last items*/
+              slice(dta,2,size(dta)-1), 
+              /* start: AKA. the zero value which is an array of structs 
+               * with a single element dta[0]
+               */
+              array(dta[0]), 
+              /* merge: do the calculations */
+              (acc, x) ->   
+                concat(acc, array(named_struct( 
+                  'Date', x.Date, 
+                  'col1', element_at(acc, -1).coln, 
+                  'col2', x.col2, 
+                  'col3', element_at(acc, -1).col3 + x.col2, 
+                  'coln', x.col3 - x.col2 
+                )))  
+             )    
+           )    
+       """)
+    df_new.show()
+    +---+----------+----+----+----+----+ 
+    | id|      Date|col1|col2|col3|coln|
+    +---+----------+----+----+----+----+
+    | M1|2020-08-01|   0|   3|   3|   2|
+    | M1|2020-08-02|   2|   2|   5|   1|
+    | M1|2020-08-03|   1|   3|   8|   0|
+    | M1|2020-08-04|   0|   3|  11|   0|
+    | M2|2020-08-01|   0|   1|   3|   1|
+    | M2|2020-08-02|   1|  -1|   2|   4|
+    +---+----------+----+----+----+----+
+
+
+
+
