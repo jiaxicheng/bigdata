@@ -38,6 +38,22 @@ Notes:
     from sparknlp.pretrained import PretrainedPipeline
     pipeline = PretrainedPipeline.from_disk("hdfs://path/to/my_folder")
 
+Result from pipelines:
+---
+ |-- ner: array (nullable = true)
+ |    |-- element: struct (containsNull = true)
+ |    |    |-- annotatorType: string (nullable = true)
+ |    |    |-- begin: integer (nullable = false)
+ |    |    |-- end: integer (nullable = false)
+ |    |    |-- result: string (nullable = true)
+ |    |    |-- metadata: map (nullable = true)
+ |    |    |    |-- key: string
+ |    |    |    |-- value: string (valueContainsNull = true)
+ |    |    |-- embeddings: array (nullable = true)
+ |    |    |    |-- element: float (containsNull = false)
+
+Where:
+ annotatorType: document, sentence, token, checked, lemma, stem, pos, embeddings, ner, entities
 
 References::
 [1] list of all POS tags: https://github.com/JohnSnowLabs/spark-nlp/releases/tag/2.4.0
@@ -52,7 +68,14 @@ Example-1: find all nouns and adjectives of a StringType column containing texts
 
     from sparknlp.pretrained import PretrainedPipeline
 
-    df = spark.read.csv("/home/xicheng/test/pandas-9.txt", header=True) 
+    df = spark.createDataFrame([
+        (2010, '09', 'tvwe', 1, 'p_5', "I do not like it because its size is not for me."),
+        (2011, '11', 'frsa', 1, 'p_7', "I am allergic to the peanut elements."),
+        (2015, '5', 'ybfd', 1, 'p_2', "It is a repeated one, please no more."),
+        (2016, '7', 'tbfb', 2, 'p_2', "It is not good for my oil hair.") 
+    ], ['years', 'month', 'u_id', 'rating_score', 'p_id', 'review']) 
+    #df = spark.read.csv("/home/xicheng/test/pandas-9.txt", header=True) 
+
     df1 = df.withColumnRenamed('review', 'text')
 
     pipeline_dl = PretrainedPipeline('explain_document_dl', lang='en')
@@ -72,8 +95,13 @@ Example-1: find all nouns and adjectives of a StringType column containing texts
     |2016 |7    |tbfb|2           |p_2 |It is not good for my oil hair.                 |[good, oil, hair]           |
     +-----+-----+----+------------+----+------------------------------------------------+----------------------------+
 
-  Note: POS taglist from https://www.ling.upenn.edu/courses/Fall_2003/ling001/penn_treebank_pos.html
-  where the regex pattern `^(?:NN|JJ)` matches the following:
+  Notes: 
+  (1) result = pipeline.fullAnnotate(df,'comment') is a shortcut of renaming comment to text and then 
+      doing `pipeline.transform(df1)`. the first argument of fullAnnotate can be a DataFrame, List or a String.
+      search `fullAnnotate` in page https://github.com/JohnSnowLabs/spark-nlp/blob/master/python/sparknlp/pretrained.py
+  
+  (2) POS taglist from https://www.ling.upenn.edu/courses/Fall_2003/ling001/penn_treebank_pos.html
+      where the regex pattern `^(?:NN|JJ)` matches the following:
   ---
    NN   -> Noun, singular or mass
    NNS  -> Noun, plural
@@ -83,4 +111,31 @@ Example-1: find all nouns and adjectives of a StringType column containing texts
    JJR  -> Adjective, comparative
    JJS  -> Adjective, superlative
 
+  (3) retrieve only the needed annotations, use sparknlp.Finisher and pyspark.ml.Pipeline
 
+    from pyspark.ml import Pipeline
+    from sparknlp import Finisher
+
+    finisher = Finisher().setInputCols(["pos","token"]) 
+    pipeline_dl = PretrainedPipeline('explain_document_dl', lang='en').model
+
+    pipeline = Pipeline(stages=[pipeline_dl, finisher])
+    result = pipeline.fit(df1).transform(df1)
+    # DataFrame[years: bigint, month: string, u_id: string, rating_score: bigint, p_id: string, text: string, finished_pos: array<string>, finished_token: array<string>]
+    # this will yield two more columns: finished_pos, finished_token both are array of strings
+
+    # use arrays_zip + filter + transform to find desired array items
+    result.selectExpr(
+        *df1.columns, 
+        "filter(arrays_zip(finished_pos, finished_token), x -> x.finished_pos rlike '^(?:JJ|NN)').finished_token as result"
+    ).show(10,0)
+    +-----+-----+----+------------+----+------------------------------------------------+----------------------------+
+    |years|month|u_id|rating_score|p_id|text                                            |result                      |
+    +-----+-----+----+------------+----+------------------------------------------------+----------------------------+
+    |2010 |09   |tvwe|1           |p_5 |I do not like it because its size is not for me.|[size]                      |
+    |2011 |11   |frsa|1           |p_7 |I am allergic to the peanut elements.           |[allergic, peanut, elements]|
+    |2015 |5    |ybfd|1           |p_2 |It is a repeated one, please no more.           |[more]                      |
+    |2016 |7    |tbfb|2           |p_2 |It is not good for my oil hair.                 |[good, oil, hair]           |
+    +-----+-----+----+------------+----+------------------------------------------------+----------------------------+
+
+  (4) available Finisher: document, sentence, token, checked, lemma, stem, pos, embeddings, ner, entities
