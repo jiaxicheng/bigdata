@@ -192,10 +192,11 @@ Spark SQL higher-order functions:
     
 
 
-(15) transform + filter to find the first non-null values in a embedded struct/array
+(15) filter to find the first non-null values in a embedded struct/array 
 
     REF: https://stackoverflow.com/questions/59316791/json-iteration-in-spark
-    Find the first non-null value in a array fields using transform + filter SQL using LATERAL VIEW + inline function
+    Find the first non-null value in a array fields using filter SQL using LATERAL VIEW + inline function
+    Update: no need using transform
 
     Spark version 2.4+:
     
@@ -207,8 +208,8 @@ Spark SQL higher-order functions:
     
       df1.selectExpr(
             "model"
-          , "transform(filter(dealerspot, x -> x.dealername[0] is not null), y -> y.dealername[0])[0] AS dealername"
-          , "transform(filter(dealerspot, x -> x.dealerlat[0] is not null), y -> y.dealerlat[0])[0] AS dealerlat"
+          , "filter(dealerspot, x -> x.dealername[0] is not null).dealername[0][0] AS dealername"
+          , "filter(dealerspot, x -> x.dealerlat[0] is not null).dealerlat[0][0] AS dealerlat"
       ).show
       +-----+----------+---------+
       |model|dealername|dealerlat|
@@ -227,16 +228,10 @@ Spark SQL higher-order functions:
     
           SELECT m.model
           ,      trim(BOTH '"' FROM 
-                   transform(
-                       filter(m.dealerspot, x -> x.dealername[0] is not null)
-                     , y -> y.dealername[0]
-                   )[0]
+                   filter(m.dealerspot, x -> x.dealername[0] is not null).dealername[0][0]
                  ) AS dealername
           ,      trim(BOTH '"' FROM
-                   transform(
-                       filter(m.dealerspot, x -> x.dealerlat[0] is not null)
-                     , y -> y.dealerlat[0]
-                   )[0]
+                   filter(m.dealerspot, x -> x.dealerlat[0] is not null).dealerlat[0][0]
                  ) AS dealerlat
           FROM df_table LATERAL VIEW OUTER inline(CarBrands) m
     

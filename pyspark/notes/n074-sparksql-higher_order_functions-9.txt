@@ -33,7 +33,7 @@ Spark SQL higher-order functions:
         transform(percentiles, x -> 
           size(
             array_distinct(
-              transform(filter(vals, y -> y.val1 > x), z -> z.val2)
+              filter(vals, y -> y.val1 > x).val2
             )
           )
         ) as distinct_count
