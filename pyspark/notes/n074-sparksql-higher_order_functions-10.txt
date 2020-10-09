@@ -236,7 +236,7 @@ Spark SQL higher-order functions:
 
 
 
-(39) build a chain of segments, use aggregate function to find the order of related rows
+(38) build a chain of segments, use aggregate function to find the order of related rows
   REF: https://stackoverflow.com/questions/63789750
   NOTE: need improve
 
@@ -310,4 +310,70 @@ Spark SQL higher-order functions:
     |        3|             c4|           c5|    3|
     |        2|             b1|           b2|    0|
     +---------+---------------+-------------+-----+
+
+
+
+(40) drop duplicates using aggregate
+  REF: https://stackoverflow.com/a/64270968/9510729
+  Notes:
+   (1) to retrieve a single fields from an array of structs, just simply use getItem method and its alternatives
+       i.e. to get an array of cities from the below city_set array
+         func.col('city_set').getItem('city')
+         func.col('city_set')['city']
+         func.col('city_set').city
+   (2) using aggregate function to drop duplicates, use array_contains() to check if x.city already exists
+       in `acc` array. see below two situations:
+
+
+    from pyspark.sql import Window, functions as func 
+    
+    d = spark.createDataFrame(
+        ('1234', '203957', '2010', 'London', 'CHEM'), ('1234', '203957', '2010', 'London', 'BIOL'), 
+        ('1234', '203957', '2011', 'London', 'PHYS'), ('1234', '203957', '2013', 'London', 'PHYS'), 
+        ('1234', '288400', '2012', 'Berlin', 'MATH'), ('1234', '288400', '2012', 'Berlin', 'CHEM'), 
+    , ['auid', 'eid', 'year', 'city', 'subject'])
+    
+    df1 = d.groupBy('auid').agg(func.sort_array(func.collect_set(func.struct('year', 'city'))).alias('city_set'))
+    +----+----------------------------------------------------------------+
+    |auid|city_set                                                        |
+    +----+----------------------------------------------------------------+
+    |1234|[[2010, London], [2011, London], [2012, Berlin], [2013, London]]|
+    +----+----------------------------------------------------------------+
+
+  Case-1: only city field is required
+
+    df2 = df1.withColumn("city_set", func.expr(""" 
+        aggregate( 
+          /* expr: take slice of city_set array from the 2nd element to the last */
+          slice(city_set,2,size(city_set)-1), 
+          /* start: initialize `acc` as an array with a single entry city_set[0].city */
+          array(city_set[0].city), 
+          /* merge: iterate through `expr`, if x.city exists in `acc`, keep as-is
+           *        , otherwise add an entry to `acc` using concat function */
+          (acc,x) -> IF(array_contains(acc,x.city), acc, concat(acc, array(x.city))) 
+        )
+    """))
+    +----+----------------+
+    |auid|        city_set|
+    +----+----------------+
+    |1234|[London, Berlin]|
+    +----+----------------+
+    
+  Case-2: the whole struct is required, keep only the first array element upon duplicate city entries
+
+    df3 = df1.withColumn("city_set", func.expr(""" 
+          aggregate( 
+            /* expr: city_set array slice from the 2nd element to the last */
+            slice(city_set,2,size(city_set)-1), 
+            /* start: initialize acc with as an array with a single entry city_set[0] */
+            array(city_set[0]), 
+            /* merge: iterate through expr, and do things based on if x.city exists in acc.city */
+            (acc,x) ->  IF(array_contains(acc.city,x.city), acc, concat(acc, array(x)))
+          )
+    """)).show(truncate=False)
+    +----+--------------------------------+
+    |auid|city_set                        |
+    +----+--------------------------------+
+    |1234|[[2010, London], [2012, Berlin]]|
+    +----+--------------------------------+
 
