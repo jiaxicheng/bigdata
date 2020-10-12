@@ -34,10 +34,10 @@ Spark SQL higher-order functions:
             "used_stock",
             """
               aggregate(
-                /* argument */
-                data,
-                /* zero expression, with datatype of 'struct<end_date:data,total:double>' */
-                (date(NULL) as end_date, double(0) as total),
+                /* expr: data array containing from 2nd element to the last */
+                slice(data,2,size(data)-1),
+                /* zero expression, initialize with data[0] with datatype of 'struct<end_date:data,total:double>' */
+                (data[0].start_date as end_date, data[0].used_stock as total),
                 /* merge: use acc.total to save accumulated sum of used_stock */
                 (acc, y) ->
                   IF(acc.total < `available stock`
@@ -48,8 +48,8 @@ Spark SQL higher-order functions:
                 z -> IF(z.total >= `available stock`, z.end_date, NULL)
               ) as end_date
             """
-        ).show(truncate=False) 
-    +-------+----------+---------------+----------+----------+                      
+        ).show(truncate=False)
+    +-------+----------+---------------+----------+----------+
     |group  |start_date|available stock|used_stock|end_date  |
     +-------+----------+---------------+----------+----------+
     |group 1|2019-12-01|100            |80        |2019-12-15|
@@ -70,9 +70,9 @@ Spark SQL higher-order functions:
     end_date_sql_expr = """
         aggregate(
           /* argument */
-          data,
+          slice(data,2,size(data)-1),
           /* zero expression, with datatype of 'struct<end_date:data,total:double>' */
-          (date(NULL) as end_date, double(0) as total),
+          (data[0].start_date as end_date, data[0].used_stock as total),
           /* merge: use acc.total to save accumulated sum of used_stock */
           (acc, y) ->
             IF(acc.total >= `available stock`

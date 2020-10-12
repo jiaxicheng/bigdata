@@ -30,24 +30,16 @@ Spark SQL higher-order functions:
      |    |    |-- updated_at: long (nullable = true)
      |    |    |-- status: string (nullable = true)
 
-    df.selectExpr(
-      """
-        aggregate(
-          status,
-          /* start: set the initial value of `acc` as an array of structs */
-          array((bigint(NULL) as updated_at, string(NULL) as status)),
-          /* merge: check and compare y with the last item of `acc` by element_at(acc, -1) */
-          (acc, y) ->
-            CASE
-              /* the first item, status is NULL, set acc = array(y) */
-              WHEN element_at(acc, -1).updated_at is NULL THEN array(y)
-              /* if status from the last item of acc != y.status, then push y to acc */
-              WHEN element_at(acc, -1).status != y.status THEN concat(acc, array(y))
-              /* else skip y, return acc as_is */
-              ELSE acc
-            END
-        ) as status
-      """).show(truncate=False)
+    df.selectExpr( 
+      """ 
+        aggregate( 
+          slice(status,2,size(status)-1), 
+          /* start: set the initial value of `acc` as an array of structs */ 
+          array(status[0]), 
+          /* merge: check and compare y with the last item of `acc` by element_at(acc, -1) */ 
+          (acc, y) -> IF(element_at(acc, -1).status != y.status, concat(acc, array(y)), acc) 
+          ) as status  
+      """).show(truncate=False)  
     +-------------------------------------------------------------------------------+
     |status                                                                         |
     +-------------------------------------------------------------------------------+

@@ -14,19 +14,18 @@ Spark SQL higher-order functions:
       .selectExpr("""
         inline_outer(
           aggregate(
-            data,
-            array((bigint(NULL) as start, bigint(NULL) as end)),
-            (acc, y) ->
-              CASE
-                WHEN element_at(acc, -1).start is NULL THEN
-                  array((y.START as start, y.END as end))
-                WHEN element_at(acc, -1).end > y.start THEN
-                  concat(acc,
-                    array((element_at(acc, -1).end as start, element_at(acc, -1).end + y.END - y.START as end))
-                  )
-                ELSE
-                  concat(acc, array((y.START as start, y.END as end)))
-              END
+            /* iterate through array data from the 2nd element to the last */
+            slice(data,2,size(data)-1),
+            /* start: zero value as array containg a single element data[0] */
+            array(data[0]),
+            /* iterate through data[1:] and append it to acc array based on the end of last element of acc array */
+            (acc, y) -> 
+              concat(acc, 
+                IF(element_at(acc, -1).end > y.start,
+                  array((element_at(acc, -1).end as start, element_at(acc, -1).end + y.END - y.START as end)),
+                  array(y)
+                )
+              )
           )
         )
         
