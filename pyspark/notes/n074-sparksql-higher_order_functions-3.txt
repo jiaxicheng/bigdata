@@ -1,0 +1,268 @@
+Continue..
+
+Spark SQL higher-order functions:
+
+
+(11) Solving the window with Gap issues using aggregate function of Spark 2.4+
+---
+Steps:
+  (1) groupby and create an sorted ArrayType column with collect_list() and sort_array()
+  (2) Using aggregate function, protocal see below:
+
+      case class ArrayAggregate(
+         argument: Expression,
+         zero: Expression,
+         merge: Expression,
+         finish: Expression
+
+  (3) argument is the ArrayType column from array_sort(collect_list)
+      we take a slice of this array from the 2nd element to the last.
+  (4) zero and merge experssion must have the same dataType and Nullability (containsNull in metadata)
+     Notes: Nullability is only ignored on the first level of dataType, if you have
+        an array of structs (like we had in most examples here), you will need to make
+        sure zero part and merge part have the same Nullability. 
+     The simplest solution is to set all initial values to NULL in zero expression
+     or add type cast(for example in this example)
+
+  (5) merge is the part to implement the logic with SQL statement, usually WHEN/CASE/END or IF statement
+  (6) For array of structs, use inline to explode and split the fields.
+
+
+Example-1: count number of records every 4 hours, the 4 hour window must have no overlap
+           but might have overlap based on the actual data
+
+  REF: https://stackoverflow.com/questions/58221350/pyspark-how-to-aggregate-over-4-hours-windows-in-groups
+
+  Below example use an array<struct<start:timestamp,cnt:int>>
+
+    from pyspark.sql.functions import expr, sort_array, collect_list
+    
+    df = spark.read.csv('/home/xicheng/test/window-9.txt', header=True)
+    
+    df1 = (df.withColumn('pdate', expr("to_timestamp(concat(Date_of_purchase, ' ', time_of_purchase),'MM/dd/yy h:mm a')"))
+        .groupby('email')
+        .agg(sort_array(collect_list('pdate')).alias('data')))
+    
+    df1.selectExpr('email', """ 
+       inline( 
+         aggregate(
+           slice(data,2,size(data)-1),
+           cast(array((data[0] as start, 1 as cnt)) as array<struct<start:timestamp,cnt:int>>),
+           (acc, y) -> 
+             IF(element_at(acc, -1).start + INTERVAL 4 HOURS >= y,
+               concat(slice(acc,1,size(acc)-1),
+                 array((element_at(acc, -1).start as start, element_at(acc, -1).cnt+1 as cnt))
+               ),
+               concat(acc, array((y as start, 1 as cnt)))
+             )
+         )
+       )
+     """).show() 
+    +-------------+-------------------+---+
+    |        email|              start|cnt|
+    +-------------+-------------------+---+
+    |def@gmail.com|2018-11-10 12:17:00|  2|
+    |def@gmail.com|2018-11-10 20:16:00|  3|
+    |abc@gmail.com|2018-11-10 12:10:00|  3|
+    |abc@gmail.com|2018-11-11 06:16:00|  2|
+    +-------------+-------------------+---+
+
+
+Example-2: Using aggregate function and concat an array to do the aggregation/reduce:
+  REF: https://stackoverflow.com/questions/57186107/pyspark-iterate-over-groups-in-a-dataframe
+  Method:
+   (1) Use groupby + sort_array + collect_list + struct to create a sorted array column `data`
+   (2) Use aggregate function to iterate through this array column from the 2nd element to the last
+       using `slice(data,2,size(data)-1)`
+   (3) initialize start acc with array(data[0])
+   (4) if y.date is between element_at(acc, -1).LB AND date_add(element_at(acc, -1).LB, 20), use the existing LB
+       so we append (Updated_date as Updated_date, y.date as date, element_at(acc, -1).LB as LB) to `acc`
+       otherwise append y to `acc`
+   (5) Use inline function to explode the array of structs
+   (6) calculate UB which is date_add(LB, 20)
+
+  Code:
+
+    from pyspark.sql.functions import array_sort, struct, collect_list
+
+    df = spark.read.csv('/home/xicheng/test/window-8.txt', header=True, inferSchema=True)
+    
+    df1 = (df.selectExpr('*', 'date_sub(date,10) as LB') 
+        .groupby('id')
+        .agg(array_sort(collect_list(struct('Updated_date', 'date', 'LB'))).alias('data')))  
+    
+    df_new = df1.selectExpr("id", """ 
+    
+       inline(   
+         aggregate(
+           slice(data,2,size(data)-1), 
+           /* initialize is important, specify data types of all fields */
+           array(data[0]),
+           (acc, y) -> 
+             concat(acc,
+               /* if y.date is in the existing [LB, UB], then use existing boundary
+                * else use y.LB as the new LB
+                */
+               IF(y.date BETWEEN element_at(acc, -1).LB AND date_add(element_at(acc, -1).LB, 20),
+                 array((y.Updated_date as Updated_date, y.date as date, element_at(acc, -1).LB as LB)),
+                 array(y)
+               )
+             )
+         )
+       )
+    """).selectExpr('*', 'date_add(LB, 20) as UB')
+    
+    df_new.show(truncate=False)
+    +---+-------------------+-------------------+----------+----------+
+    |id |Updated_date       |date               |LB        |UB        |
+    +---+-------------------+-------------------+----------+----------+
+    |b  |2018-11-15 10:36:59|2019-01-25 00:00:00|2019-01-15|2019-02-04|
+    |b  |2018-11-16 10:58:01|2019-02-10 00:00:00|2019-01-31|2019-02-20|
+    |b  |2018-11-17 10:42:12|2019-02-04 00:00:00|2019-01-31|2019-02-20|
+    |b  |2018-11-24 10:24:56|2019-02-10 00:00:00|2019-01-31|2019-02-20|
+    |b  |2018-12-01 10:28:46|2019-02-02 00:00:00|2019-01-31|2019-02-20|
+    |a  |2018-10-30 10:25:45|2019-02-14 00:00:00|2019-02-04|2019-02-24|
+    |a  |2018-11-28 10:51:34|2019-02-14 00:00:00|2019-02-04|2019-02-24|
+    |a  |2018-11-29 10:46:07|2019-01-11 00:00:00|2019-01-01|2019-01-21|
+    |a  |2018-11-30 10:42:56|2019-01-14 00:00:00|2019-01-01|2019-01-21|
+    |a  |2018-12-01 10:28:46|2019-01-16 00:00:00|2019-01-01|2019-01-21|
+    |a  |2018-12-02 10:22:06|2019-01-22 00:00:00|2019-01-12|2019-02-01|
+    +---+-------------------+-------------------+----------+----------+
+
+
+
+Example-3: set a sub-group label based on the interval of N=6, there is no overlap between label window
+    but could have gaps between adjacent windows.
+
+  REF: https://stackoverflow.com/questions/57102219/finding-non-overlapping-windows-in-a-pyspark-dataframe
+
+    from pyspark.sql.functions import sort_array, collect_list, col
+
+    d = [ (1,0), (1,1), (1,4), (1,7), (1,14), (1,18)
+        , (2,5), (2,20), (2,21)
+        , (3,0), (3,1), (3,1.5), (3,2), (3,3.5), (3,4), (3,6)
+        , (3,6.5), (3,7), (3,11), (3,14), (3,18), (3,20), (3,24)
+        , (4,0), (4,1), (4,2), (4,6), (4,7)
+    ]
+
+    mydf = spark.createDataFrame([(int(x[0]), float(x[1])) for x in d], ['id', 't'])
+
+    df1 = mydf.groupby('id').agg(sort_array(collect_list(col('t').astype('int'))).alias('data'))
+
+    df1.selectExpr("id", """
+
+        inline_outer(
+          aggregate(
+            /* expr: slice of array `data` from the 2nd element to the last */
+            slice(data,2,size(data)-1),
+            /* start: use data[0] to initialize, cast is import to resolve 
+             * datatype mismatch issue from containsNull=False 
+             */
+            cast(array((data[0] as t, 0 as t0, 0 as g)) as array<struct<t:int,t0:int,g:int>>),
+            /* merge: the main logic to setup g by comaring y to the latest saved t0 */
+            (acc, y) -> concat(acc,
+                IF(y - element_at(acc, -1).t0 < 6
+                , array(named_struct('t', y, 't0', element_at(acc, -1).t0, 'g', element_at(acc, -1).g))
+                , array(named_struct('t', y, 't0', y, 'g', element_at(acc, -1).g+1))
+                )
+              )
+          )
+        )
+
+    """).show(50)
+    +---+---+---+---+
+    | id|  t| t0|  g|
+    +---+---+---+---+
+    |  1|  0|  0|  0|
+    |  1|  1|  0|  0|
+    |  1|  4|  0|  0|
+    |  1|  7|  7|  1|
+    |  1| 14| 14|  2|
+    |  1| 18| 14|  2|
+    |  3|  0|  0|  0|
+    |  3|  1|  0|  0|
+    |  3|  1|  0|  0|
+    |  3|  2|  0|  0|
+    |  3|  3|  0|  0|
+    |  3|  4|  0|  0|
+    |  3|  6|  6|  1|
+    |  3|  6|  6|  1|
+    |  3|  7|  6|  1|
+    |  3| 11|  6|  1|
+    |  3| 14| 14|  2|
+    |  3| 18| 14|  2|
+    |  3| 20| 20|  3|
+    |  3| 24| 20|  3|
+    |  2|  5|  5|  0|
+    |  2| 20| 20|  1|
+    |  2| 21| 20|  1|
+    |  4|  0|  0|  0|
+    |  4|  1|  0|  0|
+    |  4|  2|  0|  0|
+    |  4|  6|  6|  1|
+    |  4|  7|  6|  1|
+    +---+---+---+---+
+
+  Notes:
+   (1) values of t should not have duplicates, or otherwise it might have some issues when they are shown on the boundary
+
+
+Troubleshooting: type-casting to the zero_value solved this error!
+
+ERROR: cannot resolve 'aggregate(`data`, ...)' due to data type mismatch: argument 3 requires array<struct<t:int,g:int>> type, however, 'lambdafunction(CASE WHEN (.....)'  is of array<struct<t:int,g:int>> type.
+---
+issue was from: -> ignoreNullability is not propogated recursively. thus the zero values
+should be set to NULL so left.valueContainsNull is true 
+---
+Source code:
+---
+    sql/catalyst/src/main/scala/org/apache/spark/sql/types/DataType.scala
+       def equalsStructurally(
+         from: DataType,
+          to: DataType,
+          ignoreNullability: Boolean = false): Boolean = {
+        (from, to) match {
+          case (left: ArrayType, right: ArrayType) =>
+            equalsStructurally(left.elementType, right.elementType) &&
+              (ignoreNullability || left.containsNull == right.containsNull)
+        
+          case (left: MapType, right: MapType) =>
+            equalsStructurally(left.keyType, right.keyType) &&
+              equalsStructurally(left.valueType, right.valueType) && 
+              (ignoreNullability || left.valueContainsNull == right.valueContainsNull)
+        
+          case (StructType(fromFields), StructType(toFields)) =>
+            fromFields.length == toFields.length &&
+              fromFields.zip(toFields) 
+                .forall { case (l, r) => 
+                  equalsStructurally(l.dataType, r.dataType) &&
+                    (ignoreNullability || l.nullable == r.nullable)
+                }
+    
+          case (fromDataType, toDataType) => fromDataType == toDataType
+        }
+      }
+    
+The aggregate function shown in ${merge.sql}:
+---
+    aggregate(`data`, 
+      array(named_struct('t', CAST(0 AS DOUBLE), 'g', CAST(0 AS INT))), 
+      lambdafunction(
+        CASE 
+          WHEN (element_at(namedlambdavariable(), -1).`t` = CAST(0 AS DOUBLE)) THEN 
+            array(named_struct('t', namedlambdavariable(), 'g', 0)) 
+          WHEN ((namedlambdavariable() - element_at(namedlambdavariable(), -1).`t`) < CAST(6.0BD AS DOUBLE)) THEN 
+            concat(namedlambdavariable(),
+              array(named_struct('t', namedlambdavariable(), 'g', element_at(namedlambdavariable(), -1).`g`))
+            ) 
+          ELSE 
+            concat(namedlambdavariable(), 
+              array(named_struct('t', namedlambdavariable(), 'g', (element_at(namedlambdavariable(), -1).`g` + 1)))
+            ) 
+        END, namedlambdavariable(), namedlambdavariable()
+      ), lambdafunction(namedlambdavariable(), namedlambdavariable())
+    )
+    
+    
+
+
