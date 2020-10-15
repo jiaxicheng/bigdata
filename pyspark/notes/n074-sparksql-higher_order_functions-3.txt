@@ -28,7 +28,7 @@ Steps:
   (6) For array of structs, use inline to explode and split the fields.
 
 
-Example-1: count number of records every 4 hours, the 4 hour window must have no overlap
+Example-11-1: count number of records every 4 hours, the 4 hour window must have no overlap
            but might have overlap based on the actual data
 
   REF: https://stackoverflow.com/questions/58221350/pyspark-how-to-aggregate-over-4-hours-windows-in-groups
@@ -68,7 +68,7 @@ Example-1: count number of records every 4 hours, the 4 hour window must have no
     +-------------+-------------------+---+
 
 
-Example-2: Using aggregate function and concat an array to do the aggregation/reduce:
+Example-11-2: Using aggregate function and concat an array to do the aggregation/reduce:
   REF: https://stackoverflow.com/questions/57186107/pyspark-iterate-over-groups-in-a-dataframe
   Method:
    (1) Use groupby + sort_array + collect_list + struct to create a sorted array column `data`
@@ -131,7 +131,7 @@ Example-2: Using aggregate function and concat an array to do the aggregation/re
 
 
 
-Example-3: set a sub-group label based on the interval of N=6, there is no overlap between label window
+Example-11-3: set a sub-group label based on the interval of N=6, there is no overlap between label window
     but could have gaps between adjacent windows.
 
   REF: https://stackoverflow.com/questions/57102219/finding-non-overlapping-windows-in-a-pyspark-dataframe
@@ -205,64 +205,75 @@ Example-3: set a sub-group label based on the interval of N=6, there is no overl
 
   Notes:
    (1) values of t should not have duplicates, or otherwise it might have some issues when they are shown on the boundary
-
-
-Troubleshooting: type-casting to the zero_value solved this error!
-
-ERROR: cannot resolve 'aggregate(`data`, ...)' due to data type mismatch: argument 3 requires array<struct<t:int,g:int>> type, however, 'lambdafunction(CASE WHEN (.....)'  is of array<struct<t:int,g:int>> type.
----
-issue was from: -> ignoreNullability is not propogated recursively. thus the zero values
-should be set to NULL so left.valueContainsNull is true 
----
-Source code:
----
-    sql/catalyst/src/main/scala/org/apache/spark/sql/types/DataType.scala
-       def equalsStructurally(
-         from: DataType,
-          to: DataType,
-          ignoreNullability: Boolean = false): Boolean = {
-        (from, to) match {
-          case (left: ArrayType, right: ArrayType) =>
-            equalsStructurally(left.elementType, right.elementType) &&
-              (ignoreNullability || left.containsNull == right.containsNull)
-        
-          case (left: MapType, right: MapType) =>
-            equalsStructurally(left.keyType, right.keyType) &&
-              equalsStructurally(left.valueType, right.valueType) && 
-              (ignoreNullability || left.valueContainsNull == right.valueContainsNull)
-        
-          case (StructType(fromFields), StructType(toFields)) =>
-            fromFields.length == toFields.length &&
-              fromFields.zip(toFields) 
-                .forall { case (l, r) => 
-                  equalsStructurally(l.dataType, r.dataType) &&
-                    (ignoreNullability || l.nullable == r.nullable)
-                }
-    
-          case (fromDataType, toDataType) => fromDataType == toDataType
-        }
-      }
-    
-The aggregate function shown in ${merge.sql}:
----
-    aggregate(`data`, 
-      array(named_struct('t', CAST(0 AS DOUBLE), 'g', CAST(0 AS INT))), 
-      lambdafunction(
-        CASE 
-          WHEN (element_at(namedlambdavariable(), -1).`t` = CAST(0 AS DOUBLE)) THEN 
-            array(named_struct('t', namedlambdavariable(), 'g', 0)) 
-          WHEN ((namedlambdavariable() - element_at(namedlambdavariable(), -1).`t`) < CAST(6.0BD AS DOUBLE)) THEN 
-            concat(namedlambdavariable(),
-              array(named_struct('t', namedlambdavariable(), 'g', element_at(namedlambdavariable(), -1).`g`))
-            ) 
-          ELSE 
-            concat(namedlambdavariable(), 
-              array(named_struct('t', namedlambdavariable(), 'g', (element_at(namedlambdavariable(), -1).`g` + 1)))
-            ) 
-        END, namedlambdavariable(), namedlambdavariable()
-      ), lambdafunction(namedlambdavariable(), namedlambdavariable())
-    )
-    
+   (2) Troubleshooting: type-casting to the zero_value solved this error!
+       
+       ERROR: cannot resolve 'aggregate(`data`, ...)' due to data type mismatch: argument 3 requires array<struct<t:int,g:int>> type, however, 'lambdafunction(CASE WHEN (.....)'  is of array<struct<t:int,g:int>> type.
+      ---
+      the issue was from: -> ignoreNullability is not propogated recursively. thus the zero values
+      should be set to NULL so left.valueContainsNull is true 
+      ---
+      Source code: sql/catalyst/src/main/scala/org/apache/spark/sql/types/DataType.scala
     
 
+
+Example-11-4: A typical session-gap issues:
+  REF: https://stackoverflow.com/questions/64374547
+  Target: set up session_timestamp:
+   (1) A Session only starts with an event == `E` 
+   (2) If a new event happens in one hour after the session starts, it belongs to that session.
+   (3) If an event happened more than one hour of the event who started the session, it belongs to another session
+
+    from pyspark.sql import functions as F, Window
+
+    #df = spark.read.csv('/home/xicheng/test/window-40.txt', header=True, inferSchema=True)
+    df = spark.createDataFrame([
+           ('E', '1', '2020-09-09 13:15:00'), ('E', '1', '2020-09-09 13:30:00'), ('E', '1', '2020-09-09 14:20:00'), 
+           ('T', '1', '2020-09-09 14:35:00'), ('T', '2', '2020-09-09 13:20:00'), ('E', '2', '2020-09-09 13:25:00'), 
+           ('E', '2', '2020-09-09 14:45:00'), ('T', '2', '2020-09-09 14:50:00'), ('T', '2', '2020-09-09 16:10:00'), 
+           ('E', '2', '2020-09-09 16:30:00') 
+       ], ['event', 'consumer', 'timestamp']) 
+
+    df1 = df.groupby("consumer").agg(F.sort_array(F.collect_list(F.struct("timestamp","event"))).alias("dta"))
+
+    df_new = df1.selectExpr("consumer", """ 
+       inline( 
+         aggregate( 
+           slice(dta,2,size(dta)-1), 
+           /* zero_value using dta[0] and setup session_timestamp = if(dta[0].event = 'E', dta[0].timestamp, NULL) */
+           array((dta[0] as dta, if(dta[0].event = 'E', dta[0].timestamp, NULL) as session_timestamp)), 
+           (acc, x) -> 
+             concat(acc, array((x as dta, 
+               IF(x.timestamp < element_at(acc,-1).session_timestamp + interval 1 hour 
+                , element_at(acc,-1).session_timestamp 
+                , if(x.event = 'E', x.timestamp, NULL) 
+               ) as session_timestamp))
+             ) 
+          )  
+      )  
+    """).select("consumer", "dta.*", "session_timestamp")
+    df_new.show()
+    +--------+-------------------+-----+-------------------+                        
+    |consumer|          timestamp|event|  session_timestamp|
+    +--------+-------------------+-----+-------------------+
+    |       1|2020-09-09 13:15:00|    E|2020-09-09 13:15:00|
+    |       1|2020-09-09 13:30:00|    E|2020-09-09 13:15:00|
+    |       1|2020-09-09 14:20:00|    E|2020-09-09 14:20:00|
+    |       1|2020-09-09 14:35:00|    T|2020-09-09 14:20:00|
+    |       2|2020-09-09 13:20:00|    T|               null|
+    |       2|2020-09-09 13:25:00|    E|2020-09-09 13:25:00|
+    |       2|2020-09-09 14:45:00|    E|2020-09-09 14:45:00|
+    |       2|2020-09-09 14:50:00|    T|2020-09-09 14:45:00|
+    |       2|2020-09-09 16:10:00|    T|               null|
+    |       2|2020-09-09 16:30:00|    E|2020-09-09 16:30:00|
+    +--------+-------------------+-----+-------------------+
+
+
+
+More similar Examples (island&Gap):
+(1) example-16(id=5): https://stackoverflow.com/questions/59548034
+(2) example-19(id=6): https://stackoverflow.com/questions/60109004
+(3) example-25(id=8): https://stackoverflow.com/questions/60959421
+(4) example-35(id=9): https://stackoverflow.com/questions/63739214
+(5) example-38(id=10): https://stackoverflow.com/questions/64144891
+(6) example-40(id=10): https://stackoverflow.com/a/64270968/9510729
 
