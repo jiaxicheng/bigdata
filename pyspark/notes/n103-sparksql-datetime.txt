@@ -56,8 +56,48 @@ Notes:
       trunc convert DateType into a StringType: when you need a `Date`
   (3) Interval used with Datafram API function:
       interval can not use col_name, i.e. `INTERVAL col1 months` is not working
-      df.withColumn('10_days_before', 'datetime_col' - expr('INTERVAL 10 days'))
-      
+      df.withColumn('10_days_before', 'datetime_col' - expr('INTERVAL 10 days')) 
+  (4) cast(str_col as timestamp) or timestamp(col) is available since Spark 2.1
+      def stringToTimestamp(s: UTF8String, timeZoneId: ZoneId)
+      Link: https://github.com/apache/spark/blob/master/sql/catalyst/src/main/scala/org/apache/spark/sql/catalyst/util/DateTimeUtils.scala#L211
+      Trims and parses a given UTF8 timestamp string to the corresponding a corresponding Long Value
+      The following formats are allowed:
+      * `yyyy`
+      * `yyyy-[m]m`
+      * `yyyy-[m]m-[d]d`
+      * `yyyy-[m]m-[d]d `
+      * `yyyy-[m]m-[d]d [h]h:[m]m:[s]s.[ms][ms][ms][us][us][us][zone_id]`
+      * `yyyy-[m]m-[d]dT[h]h:[m]m:[s]s.[ms][ms][ms][us][us][us][zone_id]`
+      * `[h]h:[m]m:[s]s.[ms][ms][ms][us][us][us][zone_id]`
+      * `T[h]h:[m]m:[s]s.[ms][ms][ms][us][us][us][zone_id]`
+
+  (5) cast(string_col as date) or date(col):  available since Spark 2.1+
+
+      def stringToDate(s: UTF8String): Option[SQLDate]
+      Parses a given UTF8 date string to the corresponding a corresponding [[Int]] value.
+      The following formats are allowed:
+      * `yyyy`,
+      * `yyyy-[m]m`
+      * `yyyy-[m]m-[d]d`
+      * `yyyy-[m]m-[d]d `
+      * `yyyy-[m]m-[d]d *`        <-- SPACE followed by anything
+      * `yyyy-[m]m-[d]dT*`        <-- T followed by any chars, i.e.  `2020-8-15Tdfsdg`
+
+  (6) date_trunc(fmt, ts): Datetime Patterns from https://spark.apache.org/docs/latest/sql-ref-datetime-pattern.html
+      `fmt` should be one of ["YEAR", "YYYY", "YY", "MON", "MONTH", "MM", "DAY", "DD", "HOUR", "MINUTE", "SECOND", "WEEK", "QUARTER"]
+      * fmt - the format representing the unit to be truncated to
+       - "YEAR", "YYYY", "YY" - truncate to the first date of the year that the `ts` falls in, the time part will be zero out
+       - "QUARTER" - truncate to the first date of the quarter that the `ts` falls in, the time part will be zero out
+       - "MONTH", "MM", "MON" - truncate to the first date of the month that the `ts` falls in, the time part will be zero out
+       - "WEEK" - truncate to the Monday of the week that the `ts` falls in, the time part will be zero out
+       - "DAY", "DD" - zero out the time part
+       - "HOUR" - zero out the minute and second with fraction part
+       - "MINUTE"- zero out the second with fraction part
+       - "SECOND" -  zero out the second fraction part
+       - "MILLISECOND" - zero out the microseconds
+       - "MICROSECOND" - everything remains
+
+
 
 
 Some References: 
@@ -104,7 +144,7 @@ https://stackoverflow.com/questions/54232494/working-with-microsecond-time-stamp
         |20150408-01:12:04.275753|1.428469924275753E9|
         +------------------------+-------------------+
 
-    Solution-2: cast() or timestamp
+    Solution-2: cast() or timestamp() functions, working since spark 2.1+
 
         spark.sql("select double(timestamp('2016-07-13 14:33:53.979'))").show(truncate=False)
         +----------------------------------------------------------+
@@ -123,7 +163,7 @@ https://stackoverflow.com/questions/54232494/working-with-microsecond-time-stamp
         +--------------------------+
         #DataFrame[ts: timestamp]
 
-        # this can also cover timezone converting:
+        # this can also cover timezone converting to utc_timestamp:
         spark.sql("select timestamp('2020-09-08 14:00:00.917+05:00') as ds_with_tz").show(10,0)
         +-----------------------+
         |ds_with_tz             |
@@ -164,6 +204,26 @@ Example-3: from year, month and week-number to retrieve a "Friday"(or any dayofw
 
 
 
+Example-4: get start/end date of Week/Month/Quarter/Year etc
 
+  DateType: make_date and trunc to quarter and week requires Spark 3.0+
+       Year start: trunc(`dt`, 'year')
+              end: make_date(year(`dt`),12,31) 
+    Quarter start: trunc(`dt`, 'quarter') 
+              end: last_day(add_months(trunc(`dt`, 'quarter'),2))
+      Month start: trunc(`dt`, 'MM')
+              end: last_day(trunc(`dt`, 'MM'))
+       Week start: trunc(`dt`, 'week')
+              end: date_add(trunc(`dt`, 'week'),6)
+
+  TimestampType: 
+       Year start: date_trunc('tear', `ts`)
+              end: make_timestamp(year(`ts`),12,31,23,59,59)
+    Quarter start: date_trunc('quarter', `ts`)
+              end: date_trunc('quarter', add_months(`ts`,3)) - interval 1 seconds
+      Month start: date_trunc('month', `ts`)
+              end: date_trunc('month', add_months(`ts`,1)) - interval 1 seconds
+       Week start: date_trunc('week', `ts`)
+              end: date_trunc('week', date_add(`ts`,7)) - interval 1 seconds
 
 
