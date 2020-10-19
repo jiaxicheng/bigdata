@@ -223,7 +223,7 @@ Example-11-4: A typical session-gap issues:
    (2) If a new event happens in one hour after the session starts, it belongs to that session.
    (3) If an event happened more than one hour of the event who started the session, it belongs to another session
 
-    from pyspark.sql import functions as F, Window
+    from pyspark.sql import functions as F
 
     #df = spark.read.csv('/home/xicheng/test/window-40.txt', header=True, inferSchema=True)
     df = spark.createDataFrame([
@@ -266,6 +266,46 @@ Example-11-4: A typical session-gap issues:
     |       2|2020-09-09 16:10:00|    T|               null|
     |       2|2020-09-09 16:30:00|    E|2020-09-09 16:30:00|
     +--------+-------------------+-----+-------------------+
+
+
+
+example-11-5: calculate EMA from the previously updated EMA using formula: 
+  REF: https://stackoverflow.com/questions/64248259
+  Logic: For every customer if row == 1 then SMA as EMA else ( C * LAG(EMA) + A * B ) as EMA
+
+    ab = spark.createDataFrame(
+    [(1,"1/1/2020", 41.0,0.5,   0.5 ,1,     '10.22'),
+     (1,"10/3/2020",24.0,0.3,   0.7 ,2,     ''     ),
+     (1,"21/5/2020",32.0,0.4,   0.6 ,3,     ''     ),
+     (2,"3/1/2020", 51.0,0.22,  0.78,1,     '34.78'),
+     (2,"10/5/2020",14.56,0.333,0.66,2,     ''     ),
+     (2,"30/9/2020",17.0,0.66,  0.34,3,     ''     )],["CID","date","A","B","C","Row","SMA"] )
+    
+    
+    df1 = ab.groupby('CID').agg(F.sort_array(F.collect_list(F.struct('Row','date','A','B','C','SMA'))).alias('dta'))
+    
+    df1.selectExpr(
+      "CID",
+      """
+        inline(
+          aggregate(
+            slice(dta,2,size(dta)-1),
+            array((dta[0] as data, dta[0].SMA as EMA)),
+            (acc, x) -> concat(acc, array((x as data, x.C*element_at(acc,-1).EMA + x.A*X.B as EMA)))
+          )
+        )
+      """
+    ).select("data.*", "EMA").show(truncate=False)
+    +---+---------+-----+-----+----+-----+------------------+                       
+    |Row|date     |A    |B    |C   |SMA  |EMA               |
+    +---+---------+-----+-----+----+-----+------------------+
+    |1  |1/1/2020 |41.0 |0.5  |0.5 |10.22|10.22             |
+    |2  |10/3/2020|24.0 |0.3  |0.7 |     |14.354            |
+    |3  |21/5/2020|32.0 |0.4  |0.6 |     |21.412399999999998|
+    |1  |3/1/2020 |51.0 |0.22 |0.78|34.78|34.78             |
+    |2  |10/5/2020|14.56|0.333|0.66|     |27.80328          |
+    |3  |30/9/2020|17.0 |0.66 |0.34|     |20.6731152        |
+    +---+---------+-----+-----+----+-----+------------------+
 
 
 
