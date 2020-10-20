@@ -19,13 +19,6 @@ Example-13: evaluate functions in a column using values from another dataframe
 
     df_val = spark.createDataFrame([("a","4"),("b","3"),("c.12","8"),("d","7"),("m","2"),("n","5"),("h","2020-09-01")], ["ID", "Value"])
 
-
-    df = spark.createDataFrame([
-        (1,"(a/(b+c.12))*100"),(2,"m/n*100"),(3,"d"),(4,"2*sin(pi/2)"),(5,"exp(c.12)")
-    ],["ID","Formula"])
-
-    df_val = spark.createDataFrame([("a",4),("b",3),("c.12",8),("d",7),("m",2),("n",5)],["ID", "Value"])
-
   Step-1: tokenize df.Formula
     # convert all dot preceded by a letter to underscore, then split the string with non-words 
     # remove NULL and EMPTY elements from the resulting array `tokens`
@@ -73,7 +66,8 @@ Example-13: evaluate functions in a column using values from another dataframe
 
   Step-3: create a pandas_udf to `eval()` Formula
 
-    @pandas_udf("string") 
+ # for Spark 2.3+, PandasUDFType.SCALAR
+  @pandas_udf("string") 
     def eval_formula(formula, aoa): 
       from math import sin, pi, exp 
       from datetime import datetime, timedelta
@@ -86,6 +80,23 @@ Example-13: evaluate functions in a column using values from another dataframe
         except Exception as e: 
           s.append(str(e)) 
       return Series(s) 
+
+  # for Spark 3.0+ Iterator of Multiple Series -> Iterator of Series
+    from typing import Iterator, Tuple
+    @pandas_udf("string") 
+    def eval_formula(iterator: Iterator[Tuple[Series,Series]]) -> Iterator[Series]:
+      from math import sin, pi, exp 
+      from datetime import datetime, timedelta
+      date_add = lambda x,y: (datetime.fromisoformat(x) + timedelta(days=y)).strftime("%Y-%m-%d")
+      for formula, aoa in iterator: 
+        s = [] 
+        for f,a in zip(formula, aoa): 
+          d = dict(a) 
+          try: 
+            s.append(str(eval(re.sub(r'\w+', lambda m: str(d.get(m.group(0),m.group(0))), f)))) 
+          except Exception as e: 
+            s.append(str(e)) 
+        yield Series(s) 
 
   Step-4: run the pandas_udf function
 

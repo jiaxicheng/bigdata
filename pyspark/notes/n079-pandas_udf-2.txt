@@ -3,7 +3,7 @@ Continue..
 pandas_udf and related applications:
 ---
 
-Example-3: cumprod + GROUPED_MAP
+Example-3: cumprod + GROUPED_MAP | Spark 3.0+ Window aggregate function Series -> Scalar
 
 https://stackoverflow.com/questions/59212758/pandas-to-pyspark-cumprod-function
 
@@ -12,10 +12,13 @@ Notes: this is an example when PandasUDFType.GROUPED_AGG is NOT working, for Win
        aggregation, pandas_udf requires a unbounded Window.
 
 
-Method-1: using pandas_udf / PandasUDFType.GROUPED_MAP
+Method-1: using pandas_udf / PandasUDFType.GROUPED_MAP / Spark 3.0: Series -> Scalar
 
     from pyspark.sql.functions import pandas_udf, PandasUDFType
     from pyspark.sql.types import StructType
+
+    df = spark.createDataFrame([(1, 1,0.9), (1, 2,0.13), (1, 3,0.5), (1, 4,1.0), (1, 5,0.6)], ['col1', 'col2','col3'])
+
     schema = StructType.fromJson(df.schema.jsonValue()).add('col4', 'double')    
 
     @pandas_udf(schema, PandasUDFType.GROUPED_MAP)
@@ -26,6 +29,28 @@ Method-1: using pandas_udf / PandasUDFType.GROUPED_MAP
         return pdf
 
     df.groupby('col1').apply(udf_cumprod).show()
+    +----+----+----+------+                                                         
+    |col1|col2|col3|  col4|
+    +----+----+----+------+
+    |   1|   1| 0.9|   0.1|
+    |   1|   2|0.13| 0.087|
+    |   1|   3| 0.5|0.0435|
+    |   1|   4| 1.0|   0.0|
+    |   1|   5| 0.6|   0.0|
+    +----+----+----+------+
+
+
+  For Spark 3.0+ (from pd.Series -> Any scalar) which supports not just unbounded Window frame
+
+    from pyspark.sql import Window
+    import pandas as pd
+    
+    w1 = Window.partitionBy('col1').orderBy('col2')
+
+    @pandas_udf("double")
+    def udf_cumprod(x:pd.Series) -> float:
+      return (1-x).prod().round(4)
+    df.withColumn("col4", udf_cumprod('col3').over(w1)).show()
     +----+----+----+------+                                                         
     |col1|col2|col3|  col4|
     +----+----+----+------+
@@ -60,7 +85,7 @@ Method-2: for Spark 2.4+, using Window + collect_list + aggregate
 
 
 
-Example-4: jaro distance + list comprehension + PandasUDFType.SCALAR
+Example-4: jaro distance + Iterator of Multiple Series to Iterator of Series
   Notes: input Series, output Series in the same size
          used in withColumn or select list.
 
@@ -71,11 +96,15 @@ Example-4: jaro distance + list comprehension + PandasUDFType.SCALAR
     from pyspark.sql.functions import pandas_udf, PandasUDFType
     from pyjarowinkler import distance
     from pandas import Series
+    from typing import Iterator, Tuple
 
-    # preferred method
-    @pandas_udf("float", PandasUDFType.SCALAR)
-    def get_distance(col1, col2):
-       return Series([ distance.get_jaro_distance(x, y, winkler=True, scaling=0.1) for x,y in zip(col1, col2)])
+    df = spark.createDataFrame([('AB','1B',2),('BB','BB',4),('CB','5D',6),('DB','B7F',8)], ['x','y','z']) 
+
+    # method using Spark 3.0+
+    @pandas_udf("float")
+    def get_distance(iterator: Iterator[Tuple[Series,Series]]) -> Iterator[Series]:
+      for col1, col2 in iterator:
+        yield Series([ distance.get_jaro_distance(x, y, winkler=True, scaling=0.1) for x,y in zip(col1, col2)])
 
     df.withColumn('jaro_distance', get_distance('x', 'y')).show()
     +---+---+---+-------------+
@@ -86,7 +115,6 @@ Example-4: jaro distance + list comprehension + PandasUDFType.SCALAR
     | CB| 5D|  6|          0.0|
     | DB|B7F|  8|         0.61|
     +---+---+---+-------------+
-
 
 
 
@@ -120,9 +148,22 @@ Example-5: Timestamp functions + replace + PandasUDFType.SCALAR
     |  9|2019-12-07 03:57:09|2019-12-07 07:00:09|
     +---+-------------------+-------------------+
 
+  for Spark 3.0 use Iterator[Series] -> Iterator[Series]
+  Note: Arrow supports timestamp, but not array of timestamps
+
+    from typing import Iterator
+
+    @pandas_udf('timestamp')
+    def add_one(iterator: Iterator[Series]) -> Iterator[Series]:
+      for pd_date in iterator:
+        yield Series([ t.replace(hour=7,minute=0) if t.minute > 30 else t for t in pd_date.tolist() ])
+
+    df.withColumn('ao', add_one('pd_date')).show()
 
 
-Example-6: GROUPED_MAP: run sklearn machine-learning code per group/id independantly:
+
+
+Example-6: ApplyInPandas to run sklearn machine-learning code per group/id independantly:
 ---
   REF: https://stackoverflow.com/questions/60112968/combining-pyspark-and-dbscan-with-pandas-udf
   Below example to run sklearn.cluster.DBSCAN on each id: https://scikit-learn.org/stable/modules/generated/sklearn.cluster.DBSCAN.html
@@ -146,18 +187,28 @@ Use pandas_udf:
     
     df = spark.createDataFrame(data, ["id", "X", "Y"])
     
-    @pandas_udf("id long, X double, Y double, cluster double", PandasUDFType.GROUPED_MAP)
+    schema = StructType.fromJson(df.schema.jsonValue()).add('cluster', 'double')    
+
+    # type hint is not required
     def dbscan_udf(pdf):
         pdf['cluster'] = DBSCAN(eps=0.005, min_samples=3).fit_predict(pdf[['X', 'Y']])
         return pdf
     
-In another form:
-    
-    dbscan_udf = pandas_udf(
-        lambda pdf: pdf.assign(cluster=DBSCAN(eps=0.005, min_samples=3).fit_predict(pdf[['X', 'Y']])),
-        "id long, X double, Y double, cluster double", 
-        PandasUDFType.GROUPED_MAP
-    )
-    
-    df.groupby("id").apply(dbscan_udf).show()
+    df.groupby('id').applyInPandas(dbscan_udf,schema).show()
+    +---+-------+-------+-------+                                                   
+    | id|      X|      Y|cluster|
+    +---+-------+-------+-------+
+    |  1|11.6133|48.1075|    0.0|
+    |  1|11.6142|48.1066|    0.0|
+    |  1|11.6108|48.1061|    0.0|
+    |  1|11.6207|48.1192|   -1.0|
+    |  1|11.6221|48.1223|   -1.0|
+    |  1|11.5969|48.1276|   -1.0|
+    |  2|11.5995|48.1258|   -1.0|
+    |  2|11.6127|48.1066|   -1.0|
+    |  2| 11.643|48.1275|   -1.0|
+    |  2|11.6368|48.1278|   -1.0|
+    |  2| 11.593|48.1156|   -1.0|
+    +---+-------+-------+-------+
+
 

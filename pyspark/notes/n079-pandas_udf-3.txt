@@ -10,7 +10,7 @@ Example-7: Solve the linear sum assignment problem using pandas_udf and scipy.op
      have the maximal sum of scores
   Method: 
     (1) use pivot to create professor vs students matrix
-    (2) use pandas_udf and scipy.optimize.linear_sum_assignment to calculate the combination of matrix with minimal sum of scores
+    (2) use pandas_udf and scipy.optimize.linear_sum_assignment to calculate the combination of matrix with minimal sum of scores (using applyInPandas)
     (3) use stack to normalize the resulting dataframe from (2) and then calculate is_match column
   Note: for SciPy 2.4.0+, scipy.optimize.linear_sum_assignment support a parameter: maximize
     set this to True, will return combination with max values of the sums
@@ -24,10 +24,11 @@ Example-7: Solve the linear sum assignment problem using pandas_udf and scipy.op
 
 Code:
 
-    from pyspark.sql.functions import pandas_udf, PandasUDFType, first, expr, dense_rank, broadcast
+    from pyspark.sql.functions import first, expr, dense_rank, broadcast
     from pyspark.sql.types import StructType
     from scipy.optimize import linear_sum_assignment
     from pyspark.sql import Window
+    import pandas as pd
     import numpy as np
 
     df = spark.createDataFrame([        
@@ -90,17 +91,16 @@ Code:
     # returnSchema contains one more StringType column `assigned` than the input pdf: 
     schema = StructType.fromJson(df1.schema.jsonValue()).add('assigned', 'string')
 
-    def __find_assigned(pdf, sz):
+    def __find_assigned(pdf: pd.DataFrame, sz: int) -> pd.DataFrame:
       cols = pdf.columns[2:]
       n = pdf.shape[0]
       n1 = pdf.iloc[:,2:].fillna(0).values
       _, idx = linear_sum_assignment(np.vstack((n1,np.zeros((sz-n,sz)))))
       return pdf.assign(assigned=[cols[i] for i in idx][:n])
 
+    find_assigned = lambda d: __find_assigned(d, N)
 
-    find_assigned = pandas_udf(lambda x: __find_assigned(x,N), schema, PandasUDFType.GROUPED_MAP)
-
-    df2 = df1.groupby('time').apply(find_assigned) 
+    df2 = df1.groupby('time').applyInPandas(find_assigned, schema) 
     +----------+------------+----+----+-----+-----+--------+                        
     |      time|professor_id|   1|   2|    3|    4|assigned|
     +----------+------------+----+----+-----+-----+--------+
@@ -117,7 +117,7 @@ Code:
   Step-3: use SparkSQL stack function to normalize the above df2, nagate the score values and 
           filter rows with score is NULL. the `desired` is_match column should have `assigned==student`: 
 
-    df_new = df2.selectExpr(
+    df4 = df2.selectExpr(
       'time',
       'professor_id',
       'assigned',
@@ -126,7 +126,7 @@ Code:
     .filter("score is not NULL") \
     .withColumn('is_match', expr("assigned=student"))
 
-    df_new.show(100)
+    df4.show(100)
     +----------+------------+--------+-------+-----+--------+                       
     |      time|professor_id|assigned|student|score|is_match|
     +----------+------------+--------+-------+-----+--------+
@@ -161,7 +161,7 @@ Code:
 
   Step-4: use join to convert student back to student_id (use broadcast join if possible):
 
-    df_new = df_new.join(df3, on=["time", "student"])
+    df_new = df4.join(df3, on=["time", "student"])
     
     df_new.show(100)
     +----------+-------+------------+--------+-----+--------+----------+            
@@ -211,6 +211,8 @@ Example-8: use pandas_udf with broadcast variable
     from pyspark.sql.functions import expr, flatten, pandas_udf, PandasUDFType
     from pandas import Series, read_csv
     import re
+    from typing import Iterator
+    from pyspark.broadcast import Broadcast
 
     df = spark.createDataFrame([
         ["3030 Whispering Pines Circle, Prosper Texas, US","John"],   
@@ -234,10 +236,10 @@ Example-8: use pandas_udf with broadcast variable
 
   Method-1: return an array of arrays and do flatten with Spark:
 
-    def __get_iso2_1(addr, ptn):    
+    def __get_iso2_1(addr:Series, ptn:Broadcast) -> Series:    
       return Series([ [[k]*len(re.findall(v,s)) for k,v in ptn.value.items()] for s in addr ])
 
-    get_iso2_1 = pandas_udf(lambda x:__get_iso2_1(x, df_ptn), "array<array<string>>", PandasUDFType.SCALAR)
+    get_iso2_1 = pandas_udf(lambda x:__get_iso2_1(x, df_ptn), "array<array<string>>")
 
     df.withColumn('iso2', flatten(get_iso2_1(expr("upper(address)")))).show()
     +--------------------+----+------------+                                        
@@ -249,15 +251,21 @@ Example-8: use pandas_udf with broadcast variable
     |                xvcv| ddd|          []|
     +--------------------+----+------------+
 
+  # using Iterator[Series] -> Iterator[Series]:
+
+    from typing import Iterator, Callable
+    get_iso2_3: Callable[[Iterator[Series]],Iterator[Series]] = pandas_udf(lambda x:__get_iso2_1(x, df_ptn), "array<array<string>>")
+
+
   Method-2: flatten the list using Python REF: https://stackoverflow.com/questions/952914
 
     from operator import iconcat
     from functools import reduce
 
-    def __get_iso2_2(addr, ptn): 
+    def __get_iso2_2(addr:Series, ptn:Broadcast) -> Series: 
       return Series([ reduce(iconcat, [[k]*len(re.findall(v,s)) for k,v in ptn.value.items()]) for s in addr ])
 
-    get_iso2_2 = pandas_udf(lambda x:__get_iso2_2(x, df_ptn), "array<string>", PandasUDFType.SCALAR)
+    get_iso2_2 = pandas_udf(lambda x:__get_iso2_2(x, df_ptn), "array<string>")
 
     df.withColumn('iso2', get_iso2_2(expr("upper(address)"))).show()                                                     
     +--------------------+----+------------+
@@ -271,10 +279,10 @@ Example-8: use pandas_udf with broadcast variable
 
   To find unique contries:
 
-    def __get_iso2_3(addr, ptn):
+    def __get_iso2_3(addr:Series, ptn:Broadcast) -> Series:
       return Series([ [k for k,v in ptn.value.items() if re.search(v,s)] for s in addr ])
 
-    get_iso2_1 = pandas_udf(lambda x:__get_iso2_3(x, df_ptn), "array<string>", PandasUDFType.SCALAR) 
+    get_iso2_1 = pandas_udf(lambda x:__get_iso2_3(x, df_ptn), "array<string>") 
 
     df.withColumn('iso2', get_iso2_1(expr("upper(address)"))).show()
     +--------------------+----+--------+
@@ -288,7 +296,7 @@ Example-8: use pandas_udf with broadcast variable
 
 
 
-Example-9: use reverse_geocoder to find City name from lat+long
+Example-9: use reverse_geocoder to find City name from lat+long(Iterator[Series] -> Iterator[Series])
   REF: https://stackoverflow.com/questions/63633808/finding-state-name-from-latlong-in-pysaprk-and-scala
   Method: require a external Python model `reverse_geocoder`, ideal for pandas_udf
   Code:
@@ -296,6 +304,7 @@ Example-9: use reverse_geocoder to find City name from lat+long
     from pyspark.sql.functions import pandas_udf, PandasUDFType
     import reverse_geocoder as rg
     from pandas import Series
+    from typing import Iterator
 
     df = spark.createDataFrame([
         (712,[30.60422, -98.39]),
@@ -303,9 +312,10 @@ Example-9: use reverse_geocoder to find City name from lat+long
         (713,[37.31304, -121.9])
     ], ['id', 'latlong'])
 
-    @pandas_udf("string", PandasUDFType.SCALAR)
-    def get_state_name(latlon):
-      return Series([ e["admin1"] for e in rg.search([*map(tuple,latlon)]) ])
+    @pandas_udf("string")
+    def get_state_name(it: Iterator[Series]) -> Iterator[Series]:
+      for latlon in it:
+        yield Series([ e["admin1"] for e in rg.search([*map(tuple,latlon)]) ])
 
     df.withColumn('state', get_state_name('latlong')).show()
     +---+------------------+----------+
@@ -329,12 +339,13 @@ Example-9: use reverse_geocoder to find City name from lat+long
  
 
 
-Example-10: decode lat/long from polyline encoded text column:
+Example-10: pd.Series -> pd.Series with lambda function to decode lat/long from polyline encoded text column:
   REF: https://stackoverflow.com/questions/63670324/pandas-udf-giving-error-related-to-pyarrow
 
     from pyspark.sql.functions import udf, pandas_udf
     import polyline
     from pandas import Series
+    from typing import Callable
 
     df = spark.createDataFrame([(1, (38.5, -120.2)),(2,(40.7, -120.9)), (3,(43.2, -126.4))],['id', 'latlon'])
 
@@ -342,7 +353,8 @@ Example-10: decode lat/long from polyline encoded text column:
     geoloc_encode = udf(lambda x: polyline.encode([x]))
     
     # polyline.decode takes string as input and a list of tuple as output
-    lat_lang_udf = pandas_udf(lambda x: Series([polyline.decode(s)[0] for s in x]), "array<double>")
+    lat_lang_udf: Callable[[Series],Series] = pandas_udf(
+        lambda x: Series([polyline.decode(s)[0] for s in x]), "array<double>")
 
     df.withColumn('geoloc', geoloc_encode('latlon')).withColumn('lat_long', lat_lang_udf('geoloc')).show()
     +---+--------------+----------+--------------+
@@ -364,7 +376,6 @@ Example-10: decode lat/long from polyline encoded text column:
 
 
 
-
 Example-11: use pandas_udf and spacy to find 'PERSON' or "ORG" of a name
   REF: https://stackoverflow.com/questions/63681625/using-spacy-with-pandas-udf-pyspark-error-i-cant-fix
 
@@ -378,11 +389,14 @@ Example-11: use pandas_udf and spacy to find 'PERSON' or "ORG" of a name
 
     from pandas import Series
     from pyspark.sql.functions import pandas_udf
+    from typing import Iterator
 
-    def __get_entities(x: Series) -> Series:
+    # below requires Spark 3.0+
+    def __get_entities(it: Iterator[Series]) -> Iterator[Series]:
       import spacy
-      nlp = spacy.load("en_core_web_lg")
-      return Series([ [e.label_ for e in nlp(s).ents if e.label_ in ('PERSON','ORG')] for s in x])
+      nlp = spacy.load("en_core_web_sm")
+      for x in it:
+        yield Series([ [e.label_ for e in nlp(s).ents if e.label_ in ('PERSON','ORG')] for s in x ])
 
     get_entities = pandas_udf(__get_entities, "array<string>")
 
@@ -420,14 +434,15 @@ Example-12: sorting by one column only, other columns keep original order:
 
     from pyspark.sql.functions import pandas_udf, PandasUDFType
     from pyspark.sql.types import StructType
+    from numpy import sort as np_sort
+    import pandas as pd
 
     schema = StructType.fromJson(df.schema.jsonValue()).add('col1_sorted', 'integer')
 
-    @pandas_udf(schema, PandasUDFType.GROUPED_MAP)
-    def get_col1_sorted(pdf):
-      return pdf.sort_values(['time']).assign(col1_sorted=sorted(pdf["col1"]))
+    def get_col1_sorted(pdf:pd.DataFrame) -> pd.DataFrame:
+      return pdf.sort_values(['time']).assign(col1_sorted=np_sort(pdf["col1"]))
 
-    df.groupby().apply(get_col1_sorted).show()
+    df.groupby().applyInPandas(get_col1_sorted, schema).show()
     +------+----+----+-----------+
     |  time|col1|col2|col1_sorted|
     +------+----+----+-----------+
