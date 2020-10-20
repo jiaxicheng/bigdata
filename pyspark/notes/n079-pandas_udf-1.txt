@@ -26,17 +26,76 @@ When to use Pandas UDF:
     its neighbouring rows. In such case, using the original udf, either backed by
     Scala or Python.
  
+Some configuration directives:
+(1) the default size of Arrow-record batch:
+  spark.sql.execution.arrow.maxRecordsPerBatch=10000
 
-Three PandasUDFType (as of Spark 2.4.3):
+
+Pandas for Spark 3.0+: 
+---
+Note: 
+(1) type hint for pandas_udf, type-hint is not required with applyInPandas and mapInPandas:
+  + pd.Series to primary data types + ArrayType 
+  + pd.DataFrame to StructType 
+  + from typing import Iterator, Callable, Tuple
+    + Tuple is used when Multiple Series as input arguments, see example-4,13
+    + Callable is used with `lambda` functions: 
+
+         myfunc: Callable[[pd.Series, pd.DataFrame], pd.Series] = lambda s,d: func(s,d)
+
+(2) pandas_udf function:
+  + Series to Series:
+    + take one or more pd.Series and return a pd.Series 
+    + when non-Column arguments are required for the function, using Iterator will have problem
+
+  + Iterator of Series to Iterator of Series:   
+    + useful when UDF execution requirs some expensive initialization.
+  
+    from typing import Iterator
+    @pandas_udf("long")
+    def test(iterator: Iterator[pd.Series]) -> Iterator[pd.Series]:
+      state = very_expensive_init()
+      for x in iterator: 
+        yield calculate_with_state(x, state)
+
+  + Iterator of Multiple Series to Iterator of Series: see example-4,13
+
+    from typing import Iterator, Tuple
+    @pandas_udf("long")
+    def multiply(it: Iterator[Tuple[pd.Series, pd.DataFrame]]) -> Iterator[pd.Series]:
+      for s,d in it:
+        yield s*d.v
+
+  + Series to Scalar: see example-3
+    + WindowSpec now supports more than just unbounded Window frame.
+(3) Pandas function APIs:
+  + Grouped map: pyspark.sql.GroupedData
+    + split-apply+combine
+    + applyInPandas(func, schema)
+      + func is a Python function to define the computations of each group
+      + function can take 1 or 2 arguments: func(pdf) or func(key, pdf)
+    + all data of a group must be loaded into memory before the function is applied
+      could be an issue for skewed data
+  + Map: pyspark.sql.DataFrame
+    + df.mapInPandas(iterator, schema)
+      can do something similar to applyInPandas, except without `groupby`
+  + Cogrouped map: pyspark.sql.PandasCogroupedOps
+    + Used when two dataframes are required in pandas functions, for example `merge_asof`
+    + df1.groupby(*keys).cogroup(df2.groupby(*keys)).applyInPandas(func, schema)
+      where keys are list of cols to groupby
+    + func takes either two dataframes as argument or three argument with the first one tuple (grouping keys)
+      return another pandas.DataFrame
+(4) as of Spark 3.0.0, MapType, nested StructType and array of TimestampType are not supported
+
+
+Three PandasUDFType (as of Spark 2.4.5): **deprecated**
 + SCALAR:
-  + function argument(s): is a series 
-  + function returning a scalar
+  + function argument(s): is a `pandas.core.series.Series` 
+    + for ArrayType column, each item is a `numpy.ndarray`
+  + function returning a also `pandas.core.series.Series`
   + where_to_use:
     + pyspark.sql.DataFrame.withColumn()
     + pyspark.sql.DataFrame.select()
-  Notes:
-   (1) as of spark 2.4.4, MapType, StructType are not supported as output types.
-
 
 + GROUPED_MAP: 
   + function argument(key, pdf), 
@@ -66,12 +125,11 @@ Three PandasUDFType (as of Spark 2.4.3):
   Notes:
    (1) as of spark 2.4.4, MapType, StructType are not supported as output types.
       
-Notes:
+Limitations:
  (1) as of spark 2.4.5, all Spark SQL data types are supported by Arrow-based conversion 
-     except MapType, ArrayType of TimestampType (i.e., slide window created by F.window function will not work
-     with pandas_udf), and nested StructType. 
-
-
+     except MapType, Array of Timestamp (i.e., slide window created by F.window function will not work
+     with pandas_udf), Array of Date and nested Struct. This applies to both input argument type and return type.
+     
 
 
 Some Examples:
@@ -79,6 +137,8 @@ Some Examples:
 Example-1: pandas.Series.interpolate() + GROUPED_MAP
 
 This Pandas function returns Series or DataFrame, so we can only use GROUPED_MAP:
+
+    import pandas as pd
 
     df = spark.createDataFrame([
           ('A', 't0', None) 
@@ -110,14 +170,10 @@ This Pandas function returns Series or DataFrame, so we can only use GROUPED_MAP
     +---+----+-----+
 
     # in this function, you can handle any Pandas operations
-    def f_interp(pdf): 
-        pdf['value'] = pdf.sort_values('time').value.interpolate(method='nearest') 
-        return pdf 
+    def f_interp(pdf:pd.DataFrame) -> pd.DataFrame: 
+        return pdf.assign(value=lambda x: x.sort_values('time').value.interpolate(method='nearest'))
 
-    # set up Pandas UDF function:
-    udf_interp = F.pandas_udf(f_interp, df.schema, F.PandasUDFType.GROUPED_MAP) 
-
-    df.groupby('Key').apply(udf_interp).show()
+    df.groupby('Key').applyInPandas(f_interp, df.schema).show()
     +---+----+-----+                                                                
     |Key|time|value|
     +---+----+-----+
@@ -149,14 +205,12 @@ REF: https://stackoverflow.com/questions/58204068/pyspark-cosinesimilarity-over-
         , (2, 1, 0.8, 0.8, 1.0)
       ]  , ['Customer1', 'Customer2', 'v_cust1', 'v_cust2', 'cosine_sim'])
 
-
     #Target-1: do the groupby aggregate
-    @pandas_udf('Customer1:long,cs:double', PandasUDFType.GROUPED_MAP) 
-    def cosine_similarity_groupby(key, pdf): 
+    def cosine_similarity_groupby(key:tuple, pdf:pd.DataFrame) -> pd.DataFrame: 
         cs = np.dot(pdf.v_cust1, pdf.v_cust2) / (np.linalg.norm(pdf.v_cust1) * np.linalg.norm(pdf.v_cust2)) 
         return pd.DataFrame([key + (cs,)]) 
 
-    df.groupby('Customer1').apply(cosine_similarity_groupby).show()
+    df.groupby('Customer1').applyInPandas(cosine_similarity_groupby,'Customer1:long,cs:double').show()
     +---------+------------------+                                                  
     |Customer1|                cs|
     +---------+------------------+
@@ -168,12 +222,10 @@ REF: https://stackoverflow.com/questions/58204068/pyspark-cosinesimilarity-over-
 
     schema = StructType.fromJson(df.schema.jsonValue()).add('cs', 'double')
 
-    @pandas_udf(schema, PandasUDFType.GROUPED_MAP)
-    def cosine_similarity_transform(pdf):
-        pdf['cs'] = np.dot(pdf.v_cust1, pdf.v_cust2) / (np.linalg.norm(pdf.v_cust1) * np.linalg.norm(pdf.v_cust2))
-        return pdf
+    def cosine_similarity_transform(pdf:pd.DataFrame) -> pd.DataFrame:
+      return pdf.assign(cs=lambda x: np.dot(x.v_cust1, x.v_cust2) / (np.linalg.norm(x.v_cust1) * np.linalg.norm(x.v_cust2)))
 
-    df.groupby('Customer1').apply(cosine_similarity_transform).show()
+    df.groupby('Customer1').applyInPandas(cosine_similarity_transform, schema).show()
     +---------+---------+-------+-------+----------+------------------+             
     |Customer1|Customer2|v_cust1|v_cust2|cosine_sim|                cs|
     +---------+---------+-------+-------+----------+------------------+
@@ -185,6 +237,7 @@ REF: https://stackoverflow.com/questions/58204068/pyspark-cosinesimilarity-over-
 
 
 Notes: 
+ (*) after spark 3.0+, PandasUDFType is deprecated.
  (1) When return type is `PandasUDFType.GROUPED_MAP`
      + the function can take two arguments
        + key: which is a tuple save all fields in groupby() function
@@ -214,4 +267,6 @@ Troubleshooting:
     known issue: pandas_udf()/toPandas() does not work with pyarrow 0.15.0+ (see https://issues.apache.org/jira/browse/SPARK-29367), this is fixed as of version 2.4.5 and 3.0+. also refer to the following link:
     REF: https://stackoverflow.com/questions/61202005/pyspark-2-4-5-illegalargumentexception-when-using-pandasudf
 
-
+  (3) Error: pyarrow.lib.ArrowInvalid: 'utf-32-le' codec can't decode bytes in position 0-3: code point not in range(0x110000)
+    Ans: due to the actual return type does not match the one specified in schema,
+    REF: https://www.mail-archive.com/issues@arrow.apache.org/msg30138.html
