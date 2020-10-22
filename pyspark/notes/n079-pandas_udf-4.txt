@@ -1,6 +1,6 @@
 Continue..
 
-pandas_udf and related applications:
+Pandas UDFs and Pandas function APIs
 ---
 
 Example-13: evaluate functions in a column using values from another dataframe
@@ -140,3 +140,35 @@ Example-13: evaluate functions in a column using values from another dataframe
        `nvl2(var,array(var, string(Value)),null)` to replace `array(var, string(Value))`
 
 
+
+Example-14: Google Translate ajax API implementation class <-- use Iterator[pd.Series]
+  REF: https://stackoverflow.com/questions/61140263
+  Method: A typical example using pandas_udf with Iterator[Series] to Iterator[Series] when 
+          we have to create an instance of Translator to use Google Translator API
+    
+    df = spark.createDataFrame([
+      ("Salutare",),
+      ("buongiorno",),
+      ("buongiorno ho",)
+    ],['sentence'])
+    
+    from googletrans import Translator
+    from pyspark.sql.functions import pandas_udf
+    import pandas as pd
+    from typing import Iterator
+    
+    @pandas_udf("string")
+    def text_translate(iterator:Iterator[pd.Series]) -> Iterator[pd.Series]:
+      translator = Translator()
+      for s in iterator:
+        yield pd.Series([ translator.translate(x, dest='en', src='auto').text for x in s ])
+    
+    df.withColumn('new_sentenct', text_translate('sentence')).show()
+    +-------------+-------------------+                                             
+    |     sentence|       new_sentenct|
+    +-------------+-------------------+
+    |     Salutare|           To greet|
+    |   buongiorno|       good morning|
+    |buongiorno ho|good morning I have|
+    +-------------+-------------------+
+    
