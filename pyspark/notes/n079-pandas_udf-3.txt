@@ -1,6 +1,6 @@
 Continue..
 
-pandas_udf and related applications:
+Pandas UDFs and Pandas function APIs
 ---
 
 
@@ -251,11 +251,20 @@ Example-8: use pandas_udf with broadcast variable
     |                xvcv| ddd|          []|
     +--------------------+----+------------+
 
-  # using Iterator[Series] -> Iterator[Series]:
+  # For Spark 3.0+ using Iterator[Series] -> Iterator[Series]:
 
-    from typing import Iterator, Callable
-    get_iso2_3: Callable[[Iterator[Series]],Iterator[Series]] = pandas_udf(lambda x:__get_iso2_1(x, df_ptn), "array<array<string>>")
+    from typing import Iterator
 
+    def __get_iso2_4(addr:Series, ptn:Broadcast) -> Series:
+      return Series([ [[k]*len(re.findall(v,s)) for k,v in ptn.value.items()] for s in addr ])
+
+    @pandas_udf("array<array<string>>")
+    def get_iso2_4(iterator:Iterator[Series]) -> Iterator[Series]:
+      # anything requires initialize goes here
+      for addr in iterator:
+        yield __get_iso2_4(addr, df_ptn)
+
+    df.withColumn("iso2", flatten(get_iso2_4(expr("upper(address)")))).show()
 
   Method-2: flatten the list using Python REF: https://stackoverflow.com/questions/952914
 
@@ -386,19 +395,17 @@ Example-11: use pandas_udf and spacy to find 'PERSON' or "ORG" of a name
       ['Apple Inc.']
     ]).toDF("name",)
 
-
+    # for Spark 3.0+
     from pandas import Series
     from pyspark.sql.functions import pandas_udf
     from typing import Iterator
 
-    # below requires Spark 3.0+
-    def __get_entities(it: Iterator[Series]) -> Iterator[Series]:
+    @pandas_udf("array<string>")
+    def get_entities(it: Iterator[Series]) -> Iterator[Series]:
       import spacy
       nlp = spacy.load("en_core_web_sm")
       for x in it:
         yield Series([ [e.label_ for e in nlp(s).ents if e.label_ in ('PERSON','ORG')] for s in x ])
-
-    get_entities = pandas_udf(__get_entities, "array<string>")
 
     df.withColumn('dt', get_entities('name')).show(truncate=False)
     +---------------------+--------+                                                

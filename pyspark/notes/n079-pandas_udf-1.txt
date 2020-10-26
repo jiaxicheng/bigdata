@@ -30,6 +30,10 @@ Some configuration directives:
 (1) the default size of Arrow-record batch:
   spark.sql.execution.arrow.maxRecordsPerBatch=10000
 
+* update PyArrow:
+
+    pip3 install -U pyarrow
+
 
 Pandas for Spark 3.0+: 
 ---
@@ -42,23 +46,40 @@ Note:
     + Callable is used with `lambda` functions: 
 
          myfunc: Callable[[pd.Series, pd.DataFrame], pd.Series] = lambda s,d: func(s,d)
+  + valid types used for pandas_udf are, either pd.Series or pd.DataFrame or the Iterator
+    or combination of them using Tuple etc. check below code
+  
+      python/pyspark/sql/pandas/typehints.py
 
 (2) pandas_udf function:
   + Series to Series:
     + take one or more pd.Series and return a pd.Series 
-    + when non-Column arguments are required for the function, using Iterator will have problem
+    + with non-column argument, use lambda function, see example-8 function `get_iso2_1()`
+    
+        def __get_iso2_1(addr:Series, ptn:Broadcast) -> Series:    
+          return Series([...])
+
+        get_iso2_1 = pandas_udf(lambda x:__get_iso2_1(x, df_ptn), "array<array<string>>")
 
   + Iterator of Series to Iterator of Series:   
-    + useful when UDF execution requirs some expensive initialization.
-  
-    from typing import Iterator
-    @pandas_udf("long")
-    def test(iterator: Iterator[pd.Series]) -> Iterator[pd.Series]:
-      state = very_expensive_init()
-      for x in iterator: 
-        yield calculate_with_state(x, state)
+    + useful when UDF execution requirs some expensive initialization. see Example-11,14
+    + when non-column argument, use following from example-8 function `get_iso2_4()`
 
+        from typing import Iterator
+
+        def __get_iso2_4(addr:Series, ptn:Broadcast) -> Series:
+          return Series([ ... ])
+
+        @pandas_udf("array<array<string>>")
+        def get_iso2_4(iterator:Iterator[Series]) -> Iterator[Series]:
+          state = very_expensive_init()
+          # add initialization here if needed
+          for addr in iterator:
+            yield __get_iso2_4(addr, df_ptn, state)
+
+  
   + Iterator of Multiple Series to Iterator of Series: see example-4,13
+    + pd.DataFrame also applies
 
     from typing import Iterator, Tuple
     @pandas_udf("long")
@@ -68,6 +89,8 @@ Note:
 
   + Series to Scalar: see example-3
     + WindowSpec now supports more than just unbounded Window frame.
+    + Input argument can not be StructType(df.DataFrame)
+
 (3) Pandas function APIs:
   + Grouped map: pyspark.sql.GroupedData
     + split-apply+combine
