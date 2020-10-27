@@ -21,7 +21,41 @@ Initialization:
            named_struct(name1, val1, name2, val2,...)
 
 
-ArrayType:
+
+
+  Some Examples: 
+    + named_struct:  (c1,c2)  <-- default field names are col1, col2 etc
+
+        named_struct('f1', col1)
+        named_struct('f1', col1, 'f2', col2)
+        ('f1', col2)   --> struct<col1:string,col2:double>
+        (col1)         --> same as col1 returning `double`
+        (col1 as f1)   --> not working with spark 3.0+
+        (col1 as f1, col2 as f2)  <-- fine with 1+ fields `struct<f1:double,f2:double>`
+        (f1, f2)    <-- named_struct with defult names struct<col1:string,col2:string>
+
+    + struct:
+
+       struct('f1', 'f2')
+       struct(*cols)
+       struct('f1', col('f2').alias('f2_name'))
+
+      Add a new field into an StructType column:
+        df = spark.createDataFrame([({"c1":"F6","c2":"mo"},)], schema="tt struct<c1:string,c2:string>")
+        df.selectExpr("struct(tt.*,'123' as tmp) as tt")
+       Note: '*' can ONLY be used after a column, not a field inside a StructType column. 
+          thus for array of structs, you can not use transform function iterate through and use `x.*`
+
+    + array:
+
+      to create an ArrayType Column: split, array_repeat, from_json 
+
+    + map:
+
+      To create a Map, use map_from_entries, map_from_arrays, str_to_map, create_map, from_json
+
+
+ArrayType: The index for all array functions are 1-based, Column.getItem() method are 0-based 
 ---
   + basic operations:
     + element_at(col, N)
@@ -61,7 +95,7 @@ ArrayType:
     + array_max
       array_min:
     + arrays_zip(*cols): 
-      + functionality can be replaced by zip_with for more flexibilities
+      + functionality for two cols can be replaced by zip_with for more flexibilities
     + flatten(arr):
       * flatten only 1-level(no recursive), array of arrays into an array
     + shuffle(col): 
@@ -80,17 +114,78 @@ ArrayType:
       + supported types with SparkSQL: byte, short, integer, long, date, timestamp
         only integers for DF-API
       + step can be negative, default 1 or -1 based on start/stop 
+  + SparkSQL higher-order functions:
+    + filter: from v2.4
+
+        filter(arr, x -> func(x))           
+        filter(arr, (x,i) -> func(x,i))         <-- i added Spark 3.0+
+        
+    + transform: from v2.4
+
+        transform(arr, x -> func(x))      
+        transform(arr, (x,i) -> func(x,i))  
+
+     Notes:
+      (1) the array created by transform function by default has `containsNull = False`, this will raise
+          datatype mis-match error when caocatenating with other arrays with the same schema
+
+    + zip_with: only works with two ArrayType columns
+
+        transform(arr1, arr2, (x,y) -> func(x,y))  
+
+    + aggregate: from v2.4
+
+        aggregate(
+          arr,                      /* array expr */
+          start,                    /* zero value */ 
+          (acc, y) -> func(acc, y), /* merge      */ 
+          acc -> func(acc)          /* finish     */
+        )
+
+    + exists: from v2.4
+
+        exists(arr, x -> func(x))
+
+   Notes:
+    (1) above x,y are item values, i is item index, arr[,1,2] are ArrayType columns
+
 
 MapType:
 ---
-  + map_concat(map1, map2, ...):
+  + map_concat(map1, map2, ...): from v2.4
     * concatenate maps, might contain duplicate keys.
-  + map_from_arrays(keys_arr, values_arr):
-  + map_from_entries(arr_of_structs): 
+  + map_from_arrays(keys_arr, values_arr): from v2.4
+  + map_from_entries(arr_of_structs):   from v2.4
   + map_keys(col): from v2.3
     * notes return unsorted array containing keys of the map, can be used in transform()
   + map_values(col): from v2.3
     * return unsorted array containing values of the map
+  + map_entries(col): from v3.0
+    * return an unsorted array of all entries in the given map
+  + str_to_map(text[,pairDelim[,keyValueDelim])
+    * both pairDelim and keyValueDelim are treated as regexp
+    * by default, pairDelim=',' and keyValueDelim=':'
+  + SparkSQL higher-order functions: from v3.0
+    + transform_keys: 
+
+        transform_keys(map1, (k,v) -> func(k,v))   <-- adjust Keys only
+
+    + transform_values:
+
+        transform_values(map1, (k,v) -> func(k,v))  <-- adjust values only
+
+    + map_filter:
+
+        map_filter(map1, (k,v) -> func(k,v))
+
+    + map_zip_with:
+
+        map_zip_with(map1, map2, (k,v1,v2) -> func(k,v1,v2))
+
+    + forall: from 3.0   test if a predicate holds for all elements in the array
+      
+        forall(arr, x -> func(x))
+
 
 
 ArrayType + MapType:
