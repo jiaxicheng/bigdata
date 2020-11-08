@@ -54,7 +54,7 @@ Example-11-1: count number of records every 4 hours, the 4 hour window must have
     df1.selectExpr('email', """ 
        inline( 
          aggregate(
-           slice(data,2,size(data)-1),
+           slice(data,2,size(data)),
            cast(array((data[0] as start, 1 as cnt)) as array<struct<start:timestamp,cnt:int>>),
            (acc, y) -> 
              IF(element_at(acc, -1).start + INTERVAL 4 HOURS >= y,
@@ -81,7 +81,7 @@ Example-11-2: Using aggregate function and concat an array to do the aggregation
   Method:
    (1) Use groupby + sort_array + collect_list + struct to create a sorted array column `data`
    (2) Use aggregate function to iterate through this array column from the 2nd element to the last
-       using `slice(data,2,size(data)-1)`
+       using `slice(data,2,size(data))`
    (3) initialize start acc with array(data[0])
    (4) if y.date is between element_at(acc, -1).LB AND date_add(element_at(acc, -1).LB, 20), use the existing LB
        so we append (Updated_date as Updated_date, y.date as date, element_at(acc, -1).LB as LB) to `acc`
@@ -103,7 +103,7 @@ Example-11-2: Using aggregate function and concat an array to do the aggregation
     
        inline(   
          aggregate(
-           slice(data,2,size(data)-1), 
+           slice(data,2,size(data)), 
            /* initialize is important, specify data types of all fields */
            array(data[0]),
            (acc, y) -> 
@@ -162,7 +162,7 @@ Example-11-3: set a sub-group label based on the interval of N=6, there is no ov
         inline_outer(
           aggregate(
             /* expr: slice of array `data` from the 2nd element to the last */
-            slice(data,2,size(data)-1),
+            slice(data,2,size(data)),
             /* start: use data[0] to initialize, cast is import to resolve 
              * datatype mismatch issue from containsNull=False 
              */
@@ -246,7 +246,7 @@ Example-11-4: A typical session-gap issues:
     df_new = df1.selectExpr("consumer", """ 
        inline( 
          aggregate( 
-           slice(dta,2,size(dta)-1), 
+           slice(dta,2,size(dta)), 
            /* zero_value using dta[0] and setup session_timestamp = if(dta[0].event = 'E', dta[0].timestamp, NULL) */
            array((dta[0] as dta, if(dta[0].event = 'E', dta[0].timestamp, NULL) as session_timestamp)), 
            (acc, x) -> 
@@ -297,7 +297,7 @@ example-11-5: calculate EMA from the previously updated EMA using formula:
       """
         inline(
           aggregate(
-            slice(dta,2,size(dta)-1),
+            slice(dta,2,size(dta)),
             array((dta[0] as data, dta[0].SMA as EMA)),
             (acc, x) -> concat(acc, array((x as data, x.C*element_at(acc,-1).EMA + x.A*X.B as EMA)))
           )
