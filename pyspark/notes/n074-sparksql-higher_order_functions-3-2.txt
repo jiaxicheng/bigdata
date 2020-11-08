@@ -1,0 +1,160 @@
+Continue..
+
+Spark SQL higher-order functions:
+
+
+(11) Solving the window with Gap issues using aggregate function of Spark 2.4+
+
+Example-11-7: using aggregate function to apply logic which require some sort of row iterator 
+  REF: https://stackoverflow.com/questions/64660047
+  Note: Spark SQL using derived-table/CTE and Lateral View with inline function:
+
+    df = spark.createDataFrame([
+        ('01-10-2020', 'x', 10, 0), ('02-10-2020', 'x', 10, 0), ('03-10-2020', 'x', 15, 1), 
+        ('04-10-2020', 'x', 15, 1), ('05-10-2020', 'x', 5, 0), ('06-10-2020', 'x', 13, 1), 
+        ('07-10-2020', 'x', 10, 1), ('08-10-2020', 'x', 10, 0), ('09-10-2020', 'x', 15, 1), 
+        ('01-10-2020', 'y', 10, 0), ('02-10-2020', 'y', 18, 0), ('03-10-2020', 'y', 6, 1), 
+        ('04-10-2020', 'y', 10, 0), ('05-10-2020', 'y', 20, 0)
+    ], ['date', 'item', 'avg_val', 'conditions'])
+
+    df.createOrReplaceTempView("record")
+
+    spark.sql("""
+      SELECT t1.item, m.* 
+      FROM (
+        SELECT item, sort_array(collect_list(struct(date,avg_val,conditions,conditions as flag))) as dta
+        FROM record
+        GROUP BY item
+      ) as t1 LATERAL VIEW OUTER inline(
+        aggregate(
+          /* expr: set up array `dta` from the 2nd element to the last */
+          slice(dta,2,size(dta)),
+          /* start: set up and initialize `acc` using dta[0] to a struct containing two fields: 
+           * - dta: an array of structs with a single element dta[0] 
+           * - counter: number of rows after flag=1, can be from `0` to `N+1`
+           */
+          (array(dta[0]) as dta, dta[0].conditions as counter),
+          /* merge: iterate through the `expr` using x and update two fields of `acc`
+           * - dta: append values from x to acc.dta array using concat + array functions
+           *        update flag using `IF(acc.counter IN (0,5) and x.conditions = 1, 1, 0)` 
+           * - counter: increment by 1 if acc.counter is between 1 and 4
+           *            , otherwise set value to x.conditions
+           */
+          (acc, x) -> named_struct(
+              'dta', concat(acc.dta, array(named_struct(
+                 'date', x.date,
+                 'avg_val', x.avg_val,
+                 'conditions', x.conditions,
+                 'flag', IF(acc.counter IN (0,5) and x.conditions = 1, 1, 0)
+               ))),
+              'counter', IF(acc.counter > 0 and acc.counter < 5, acc.counter+1, x.conditions)
+            ),    
+          /* final: retrieve acc.dta only and discard acc.counter */
+          acc -> acc.dta
+        )
+      ) m  
+    """).show(50)
+    +----+----------+-------+----------+----+
+    |item|      date|avg_val|conditions|flag|
+    +----+----------+-------+----------+----+
+    |   x|01-10-2020|     10|         0|   0|
+    |   x|02-10-2020|     10|         0|   0|
+    |   x|03-10-2020|     15|         1|   1|
+    |   x|04-10-2020|     15|         1|   0|
+    |   x|05-10-2020|      5|         0|   0|
+    |   x|06-10-2020|     13|         1|   0|
+    |   x|07-10-2020|     10|         1|   0|
+    |   x|08-10-2020|     10|         0|   0|
+    |   x|09-10-2020|     15|         1|   1|
+    |   y|01-10-2020|     10|         0|   0|
+    |   y|02-10-2020|     18|         0|   0|
+    |   y|03-10-2020|      6|         1|   1|
+    |   y|04-10-2020|     10|         0|   0|
+    |   y|05-10-2020|     20|         0|   0|
+    +----+----------+-------+----------+----+
+
+**Where:**
+
+1. using groupby to collect rows for the same item into an array of structs named `dta` column with 4 fields: date, avg_val, conditions and flag and sorted by date
+2. use aggregate function to iterate the above array of structs, update the flag field based on the `counter` and `conditions` 
+3. use Lateral VIEW and inline function to explode the resulting array of structs from the above aggregate function
+
+ **Note:** 
+  (1) the proposed SQL is for N=4, where we have `acc.counter IN (0,5)` and `acc.counter < 5` in the SQL. For any N, adjust the above to: `acc.counter IN (0,N+1)` and `acc.counter < N+1`, the below shows the result for `N=2`:
+
+    +----+----------+-------+----------+----+                                       
+    |item|      date|avg_val|conditions|flag|
+    +----+----------+-------+----------+----+
+    |   x|01-10-2020|     10|         0|   0|
+    |   x|02-10-2020|     10|         0|   0|
+    |   x|03-10-2020|     15|         1|   1|
+    |   x|04-10-2020|     15|         1|   0|
+    |   x|05-10-2020|      5|         0|   0|
+    |   x|06-10-2020|     13|         1|   1|
+    |   x|07-10-2020|     10|         1|   0|
+    |   x|08-10-2020|     10|         0|   0|
+    |   x|09-10-2020|     15|         1|   1|
+    |   y|01-10-2020|     10|         0|   0|
+    |   y|02-10-2020|     18|         0|   0|
+    |   y|03-10-2020|      6|         1|   1|
+    |   y|04-10-2020|     10|         0|   0|
+    |   y|05-10-2020|     20|         0|   0|
+    +----+----------+-------+----------+----+
+
+  (2) in case there are too many columns that are not used in calculation, split flag from other fields into two arrays
+
+    spark.sql("""
+      /* cte to create a table with item and an array of structs containing all associated rows sorted by date */
+      WITH t1 as (
+        SELECT item, sort_array(collect_list(struct(date,avg_val,conditions))) as dta
+        FROM record
+        GROUP BY item
+      )
+      SELECT t1.item, m.dta.*, m.flag 
+      FROM t1 LATERAL VIEW OUTER 
+        inline(
+          aggregate(
+            /* expr: iterate through array dta from the 2nd element to the last */
+            slice(dta,2,size(dta)),
+            /* start: set up and initialize `acc` using dta[0] to a struct containing three fields: 
+             * - dta: an array of structs with the same fields as dta array
+             * - flag: an array of 0 or 1 based on conditions and N=4
+             * - counter: number of rows after flag=1
+             */
+            (array(dta[0]) as dta, array(dta[0].conditions) as flag, dta[0].conditions as counter),
+            /* merge: iterate the `expr` using x and update three fields
+             * - dta: append x to acc.dta array using concat + array functions
+             * - flag: calculate new flag by `IF(acc.counter IN (0,5) and x.conditions = 1, 1, 0)` 
+             *         and append the result to acc.flag array
+             * - counter: increment by 1 if acc.counter is between 1 and 4, otherwise set it to x.conditions
+             */
+            (acc, x) -> named_struct(
+              'dta', concat(acc.dta, array(x)),
+              'flag', concat(acc.flag, array(IF(acc.counter IN (0,5) and x.conditions = 1, 1, 0))),
+              'counter', IF(acc.counter > 0 and acc.counter < 5, acc.counter+1, x.conditions)
+            ),
+            /* final: merge acc.dta and acc.flag into an array of structs with two fields dta and flag */
+            acc -> zip_with(acc.dta, acc.flag, (x,y) -> (x as dta, y as flag))
+          )
+        ) m
+    """).show(50)
+    +----+----------+-------+----------+----+                                       
+    |item|date      |avg_val|conditions|flag|
+    +----+----------+-------+----------+----+
+    |x   |01-10-2020|10     |0         |0   |
+    |x   |02-10-2020|10     |0         |0   |
+    |x   |03-10-2020|15     |1         |1   |
+    |x   |04-10-2020|15     |1         |0   |
+    |x   |05-10-2020|5      |0         |0   |
+    |x   |06-10-2020|13     |1         |0   |
+    |x   |07-10-2020|10     |1         |0   |
+    |x   |08-10-2020|10     |0         |0   |
+    |x   |09-10-2020|15     |1         |1   |
+    |y   |01-10-2020|10     |0         |0   |
+    |y   |02-10-2020|18     |0         |0   |
+    |y   |03-10-2020|6      |1         |1   |
+    |y   |04-10-2020|10     |0         |0   |
+    |y   |05-10-2020|20     |0         |0   |
+    +----+----------+-------+----------+----+
+
+
