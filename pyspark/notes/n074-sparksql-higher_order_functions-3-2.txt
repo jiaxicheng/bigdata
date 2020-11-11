@@ -191,3 +191,51 @@ Example-11-7: using aggregate function to apply logic which require some sort of
 
 
 
+Example-11-8: set up begin/end effective date (type-2 SCD) using aggregate function
+  REF:https://stackoverflow.com/q/64721132/9510729
+  Note: this can be done using Window function by the typical question of adding a sub-group label `g`
+        add example here for an example of using type casting and `(..)` for struct.
+
+    from pyspark.sql import functions as F
+
+    df = spark.createDataFrame([
+        ('AA', 'foo', '2020-01-01'), ('AA', 'bar', '2020-01-02'), 
+        ('AA', 'bar', '2020-01-03'), ('AA', 'baz', '2020-01-04')
+    ], ['key', 'attr', 'extract_date'])
+    #df = spark.read.csv('/home/xicheng/test/aggregate-5.txt', header=True)
+
+    df.groupby('key') \
+        .agg(F.expr("sort_array(collect_list(struct(extract_date,attr)), False) as dta")) \
+        .selectExpr("key", """
+          inline(
+            aggregate(
+              slice(dta,2,size(dta)),
+              cast(array((dta[0].attr, dta[0].extract_date, '9999-12-31')) 
+                as array<struct<attr:string,begin_effective:string,end_effective:string>>),
+              (acc, x) -> 
+                 IF(x.attr = element_at(acc,-1).attr
+                  , concat(slice(acc,1,size(acc)-1), array(named_struct(
+                        'attr', x.attr,
+                        'begin_effective', x.extract_date,
+                        'end_effective', element_at(acc,-1).end_effective
+                      )))
+                  , concat(acc, array(named_struct(
+                        'attr', x.attr, 
+                        'begin_effective', x.extract_date, 
+                        'end_effective', element_at(acc,-1).begin_effective
+                      )))
+                 )
+            )
+          ) 
+    """).show()
+    +---+----+---------------+-------------+                                        
+    |key|attr|begin_effective|end_effective|
+    +---+----+---------------+-------------+
+    | AA| baz|     2020-01-04|   9999-12-31|
+    | AA| bar|     2020-01-02|   2020-01-04|
+    | AA| foo|     2020-01-01|   2020-01-02|
+    +---+----+---------------+-------------+
+
+
+
+
