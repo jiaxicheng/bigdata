@@ -1,0 +1,252 @@
+Use from_json + to_json to convert StructType into MapType, this is very useful when fields of StructType 
+are dynamic and you want to iterate through all fields. converting StructType into MapType provides flexibility
+
+
+--
+Example-1: convert/explode struct of structs into Rows using explode + from_json functions
+  REF: https://stackoverflow.com/questions/60658754/can-i-transform-a-complex-json-object-to-multiple-rows
+  Method: use from_json function to convert StructType into MapType, explode the result and then find desired fields:
+    
+    from pyspark.sql.functions import explode, from_json, to_json, json_tuple, coalesce
+
+    data = """
+    {
+        "id": "someGuid",
+        "data": {
+            "id": "someGuid",
+            "data": {
+                "players": {
+                    "player_1": {
+                        "id": "player_1",
+                        "locationId": "someGuid",
+                        "name": "someName",
+                        "assets": {
+                            "assetId1": {
+                                "isActive": true,
+                                "playlists": {
+                                    "someId1": true,
+                                    "someOtherId1": false
+                                }
+                            },
+                            "assetId2": {
+                                "isActive": true,
+                                "playlists": {
+                                    "someId1": true
+                                }
+                            }
+                        }
+                    },
+                    "player_2": {
+                        "id": "player_2",
+                        "locationId": "someGuid",
+                        "name": "someName",
+                        "dict": {
+                            "assetId3": {
+                                "isActive": true,
+                                "playlists": {
+                                    "someId1": true,
+                                    "someOtherId1": false
+                                }
+                            },
+                            "assetId4": {
+                                "isActive": true,
+                                "playlists": {
+                                    "someId1": true
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "lastRefreshed": "2020-01-23T19:29:15.6354794Z",
+            "expiresAt": "9999-12-31T23:59:59.9999999",
+            "dataSourceId": "someId"
+        }
+    }"""
+
+    # the file json-21.txt contains a JSON string from the following stackoverflow link
+    # https://stackoverflow.com/questions/60658754
+    df = spark.read.json(sc.parallelize([data]))
+    #df = spark.read.json('/home/xicheng/test/json-21.txt', multiLine=True)
+    
+    df.select(explode(from_json(to_json('data.data.players'),"map<string,string>"))) \
+      .select(json_tuple('value', 'locationId', 'id', 'name', 'assets', 'dict').alias('Location', 'Player_ID', 'Player', 'assets', 'dict')) \
+      .select('*', explode(from_json(coalesce('assets','dict'),"map<string,struct<isActive:boolean,playlists:string>>"))) \
+      .selectExpr(
+        'Location', 
+        'Player_ID', 
+        'Player', 
+        'key as Asset_ID', 
+        'value.isActive', 
+        'explode(from_json(value.playlists, "map<string,string>")) as (Playlist_ID, Playlist_Status)'
+      ) \
+    .show()
+    +--------+---------+--------+--------+--------+------------+---------------+
+    |Location|Player_ID|  Player|Asset_ID|isActive| Playlist_ID|Playlist_Status|
+    +--------+---------+--------+--------+--------+------------+---------------+
+    |someGuid| player_1|someName|assetId1|    true|     someId1|           true|
+    |someGuid| player_1|someName|assetId1|    true|someOtherId1|          false|
+    |someGuid| player_1|someName|assetId2|    true|     someId1|           true|
+    |someGuid| player_2|someName|assetId3|    true|     someId1|           true|
+    |someGuid| player_2|someName|assetId3|    true|someOtherId1|          false|
+    |someGuid| player_2|someName|assetId4|    true|     someId1|           true|
+    +--------+---------+--------+--------+--------+------------+---------------+
+
+  Notes:
+   (1) whenever fieldname is uncertain and the order of the fieldname is not a concern, converting
+       StructType into MapType is an option to row-exploding.
+   (2) json_tuple is perfect for a JSON dictionary when the fieldname is known
+
+
+Example-2: use with filter (dynamic name with JSON dictionaries are not supported with JSONPath)
+  REF: https://stackoverflow.com/questions/60958869
+  Method: Below use from_json + to_json to convert StructType into MapType and then retrieve the map_keys
+          and filter the dataframe based on the first items of the map_keys array:
+
+  Code:
+
+    from pyspark.sql.functions import from_json, to_json, map_keys
+
+    data = """[
+    {
+        "acc":"0",
+        "info":{
+            "extract":{
+                "abc123:def456:ghi789":{
+                    "tags":{
+                        "name":"Joe",
+                        "Surname":"Doe",
+                        "address":"somewhere"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "acc":"1",
+        "info":{
+            "extract":{
+                "jkl123:mno456:pqr789":{
+                    "tags":{
+                        "name":"Will",
+                        "Surname":"Smith",
+                        "adress":"Somewhere_else"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "acc":"2",
+        "info":{
+            "extract":{
+                "jkl445:mno246:pqr288":{
+                    "tags":{
+                        "name":"Eric",
+                        "Surname":"Clapton"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "acc":"3",
+        "info":{
+            "extract":{
+
+            }
+        }
+    }
+    ]"""
+
+    # json-24.txt contains the JSON string listed in the above mentioned SO-post
+    df = spark.read.json(sc.parallelize([data]))
+    #df = spark.read.json('/home/xicheng/test/json-24.txt',multiLine=True)
+    
+    # regex pattern provided by OP
+    ptn = 'jk[a-z,0-9]+:[a-z,0-9]+:[a-z,0-9]+'
+
+    df.filter(map_keys(from_json(to_json('info.extract'), 'map<string,string>'))[0].rlike(ptn)).show(10,0)
+    +---+--------------------------------------+
+    |acc|info                                  |
+    +---+--------------------------------------+
+    |1  |[[, [[Smith, Somewhere_else, Will]],]]|
+    |2  |[[,, [[Clapton, Eric]]]]              |
+    +---+--------------------------------------+
+
+
+
+
+Example-3: use with stack function to transpose a wide dataframe
+  REF:https://stackoverflow.com/questions/64742992/transform-a-lengthy-json-struct-to-rows-and-not-columns-in-spark
+  Note: since columns have different DataType(StructType has different fields), we use from_json + to_json to convert
+        StructType into MapType and then do stack.
+  Code:
+
+    data = [
+      {"Apple":{"Ripe":1}, "Mango":{"Ripe":5}, "Grape":{"Raw":17}, "Berry":{"Not Ripe":1}, "Cherry":{"Ripe":3}},
+      {"Apple":{"Ripe":21}, "Mango":{"Ripe":25}, "Grape":{"Raw":217}, "Berry":{"Not Ripe":21}, "Cherry":{"Ripe":23}}
+    ]
+    
+    df = spark.read.json(spark.sparkContext.parallelize(data))
+    
+    df.printSchema()
+    root
+     |-- Apple: struct (nullable = true)
+     |    |-- Ripe: long (nullable = true)
+     |-- Berry: struct (nullable = true)
+     |    |-- Not Ripe: long (nullable = true)
+     |-- Cherry: struct (nullable = true)
+     |    |-- Ripe: long (nullable = true)
+     |-- Grape: struct (nullable = true)
+     |    |-- Raw: long (nullable = true)
+     |-- Mango: struct (nullable = true)
+     |    |-- Ripe: long (nullable = true)
+
+  Code:
+
+    from pyspark.sql import functions as F
+
+    cols = df.columns
+
+    df1 = df.selectExpr(f"""
+      stack(
+        {len(cols)}, 
+        {','.join(f'''"{c}", from_json(to_json(`{c}`), 'map<string,int>')''' for c in cols)}
+      ) as (c, kv)
+    """)
+    +------+----------------+
+    |     c|              kv|
+    +------+----------------+
+    | Apple|     [Ripe -> 1]|
+    | Berry| [Not Ripe -> 1]|
+    |Cherry|     [Ripe -> 3]|
+    | Grape|     [Raw -> 17]|
+    | Mango|     [Ripe -> 5]|
+    | Apple|    [Ripe -> 21]|
+    | Berry|[Not Ripe -> 21]|
+    |Cherry|    [Ripe -> 23]|
+    | Grape|    [Raw -> 217]|
+    | Mango|    [Ripe -> 25]|
+    +------+----------------+
+    DataFrame[c: string, kv: map<string,int>]
+
+    df1.selectExpr("c", "explode(kv) as (k,v)").groupBy('c').pivot('k').agg(F.sum('v')).show()
+    +------+--------+----+----+                                                     
+    |     c|Not Ripe| Raw|Ripe|
+    +------+--------+----+----+
+    | Grape|    null| 234|null|
+    | Mango|    null|null|  30|
+    |Cherry|    null|null|  26|
+    | Apple|    null|null|  22|
+    | Berry|      22|null|null|
+    +------+--------+----+----+
+
+  **Where:**
+   (1) use from_json + to_json to convert all columns with StructType into MapType, for example:
+
+        from_json(to_json(`Apple`), 'map<string,int>')
+
+   (2) use stack to convert columns into Rows with two columns: c as column_name and kv as the column_value(MapType)
+   (3) explode kv and then do groupby + pivot and agg
+
