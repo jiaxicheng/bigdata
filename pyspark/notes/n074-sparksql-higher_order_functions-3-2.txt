@@ -237,5 +237,57 @@ Example-11-8: set up begin/end effective date (type-2 SCD) using aggregate funct
     +---+----+---------------+-------------+
 
 
+Example-11-9: set up min_time in a fixed window, need iterate through the list
+  REF: https://stackoverflow.com/questions/64739902/find-min-value-for-every-5-hour-interval
+  Method: a simpler version of the type, use array of int as accumulator and element_at(acc,-1) to 
+          refer to the previous data.
+  Code:
+
+    val df = Seq(
+      ("1", 1), ("1", 1), ("1", 2), ("1", 4), ("1", 5), ("1", 6), ("1", 8),
+      ("1", 12), ("1", 12), ("1", 13), ("1", 14), ("1", 15), ("1", 16)
+    ).toDF("id", "time")
+    
+    
+    val df_new = (df.groupBy('id)
+      .agg(sort_array(collect_list('time)) as 'dta)
+      .selectExpr("id", """
+        inline(
+          aggregate(
+            /* expr: set up array slice from the 2nd element to the last 
+             * notice the indices for slice function is 1-based while dta[i] is 0-based
+             */
+            slice(dta,2,size(dta)), 
+            /* start: initialize `acc` with the first element of dta including value and data type */
+            array((dta[0] as time, dta[0] as min_time)), 
+            /* merge: iterate through the expr using `x`, 
+                element_at(acc,-1).min_time return the min_time in the last iteration */
+            (acc,x) -> concat(acc, array(named_struct(
+               'time', x, 
+               'min_time', IF(element_at(acc,-1).min_time > x-6, element_at(acc,-1).min_time, x)
+             )))
+          )
+        )
+       """))
+    
+    df_new.show
+    +---+----+--------+                                                             
+    | id|time|min_time|
+    +---+----+--------+
+    |  1|   1|       1|
+    |  1|   1|       1|
+    |  1|   2|       1|
+    |  1|   4|       1|
+    |  1|   5|       1|
+    |  1|   6|       1|
+    |  1|   8|       8|
+    |  1|  12|       8|
+    |  1|  12|       8|
+    |  1|  13|       8|
+    |  1|  14|      14|
+    |  1|  15|      14|
+    |  1|  16|      14|
+    +---+----+--------+
+    
 
 
