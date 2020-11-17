@@ -1,0 +1,230 @@
+Processing XML using Spark:
+(1) load xml using spark-xml
+(2) process XML using SparkSQL xpath related functions
+
+spark-xml Python API: https://github.com/databricks/spark-xml#python-api
+
+
+Sample-1: Load XML, sample https://docs.microsoft.com/en-us/previous-versions/windows/desktop/ms762271(v=vs.85)
+
+  """Load XML into spaek dataframe:
+  (1) can also use `.format('xml')` to replace `.format("com.databricks.spark.xml")`
+  (2)  must specify `rowTag` to form the Row object in DataFrame
+  """
+
+    df = spark.read.format("com.databricks.spark.xml") \
+              .options(rowTag="book", rootTag="catalog") \
+              .load('file:///home/hdfs/test/pyspark/xml-1.txt')
+
+    df.show()
+    +-----+--------------------+--------------------+---------------+-----+------------+--------------------+
+    |  _id|              author|         description|          genre|price|publish_date|               title|
+    +-----+--------------------+--------------------+---------------+-----+------------+--------------------+
+    |bk101|Gambardella, Matthew|An in-depth look ...|       Computer|44.95|  2000-10-01|XML Developer's G...|
+    |bk102|          Ralls, Kim|A former architec...|        Fantasy| 5.95|  2000-12-16|       Midnight Rain|
+    |bk103|         Corets, Eva|After the collaps...|        Fantasy| 5.95|  2000-11-17|     Maeve Ascendant|
+    |bk104|         Corets, Eva|In post-apocalyps...|        Fantasy| 5.95|  2001-03-10|     Oberon's Legacy|
+    |bk105|         Corets, Eva|The two daughters...|        Fantasy| 5.95|  2001-09-10|  The Sundered Grail|
+    |bk106|    Randall, Cynthia|When Carla meets ...|        Romance| 4.95|  2000-09-02|         Lover Birds|
+    |bk107|      Thurman, Paula|A deep sea diver ...|        Romance| 4.95|  2000-11-02|       Splish Splash|
+    |bk108|       Knorr, Stefan|An anthology of h...|         Horror| 4.95|  2000-12-06|     Creepy Crawlies|
+    |bk109|        Kress, Peter|After an inadvert...|Science Fiction| 6.95|  2000-11-02|        Paradox Lost|
+    |bk110|        O'Brien, Tim|Microsoft's .NET ...|       Computer|36.95|  2000-12-09|Microsoft .NET: T...|
+    |bk111|        O'Brien, Tim|The Microsoft MSX...|       Computer|36.95|  2000-12-01|MSXML3: A Compreh...|
+    |bk112|         Galos, Mike|Microsoft Visual ...|       Computer|49.95|  2001-04-16|Visual Studio 7: ...|
+    +-----+--------------------+--------------------+---------------+-----+------------+--------------------+
+
+  Sample-2:
+'''
+<?xml version="1.0" encoding="utf-8"?>
+<tags>
+  <row Id="1" TagName="inclination" Count="18" ExcerptPostId="553" WikiPostId="552" />
+  <row Id="3" TagName="exoplanet" Count="219" ExcerptPostId="11" WikiPostId="10" />
+</tags>
+'''
+
+    df = spark.read.format("xml") \
+                   .option("rowTag", "row") \
+                   .option("path", 'file:///home/hdfs/test/pyspark/xml-2.txt') \
+                   .load()
+    df.show()
+    +------+--------------+---+-----------+-----------+
+    |_Count|_ExcerptPostId|_Id|   _TagName|_WikiPostId|
+    +------+--------------+---+-----------+-----------+
+    |    18|           553|  1|inclination|        552|
+    |   219|            11|  3|  exoplanet|         10|
+    +------+--------------+---+-----------+-----------+
+    
+################
+Options:
+* rowTag: the XML tag to identify Row object
+* valueTag: used when there is no child-element but attributes, this will becomes `struct`,
+            _VALUE as the name of the Value in this element
+* path: location to read/write file, can also be specified with load() method
+* samplingRatio / inferSchema: by default schema is inferred based on the first Row object in file 
+* attributePrefix: by default, all attributes have a underscore '_' prefix
+* compression (only for Writing): compression codec to use when saving to file (bzip2, gzip, lz4, snappy)
+
+for more check link: https://github.com/databricks/spark-xml#features
+
+Software installation notes:
+(1) Install sbt:
+  wget http://dl.bintray.com/sbt/rpm/sbt-0.13.5.rpm
+  rpm -ivh sbt-0.13.5.rpm
+
+(2) download spark-xml
+  git clone https://github.com/databricks/spark-xml.git
+  cd spark-xml
+  sbt package
+
+(3) copy the target jar file to SPARK_HOME/jars folder, sync to all worker nodes
+  cp target/scala-2.11/spark-xml_2.11-0.6.0.jar SPARK_HOME/jars
+
+
+##############################################
+# processing XML using XPATH from Spark SQL
+##############################################
+** available at least from Spark 2.3.0 **
+
+Example-1: parsing XML with XPATH 
+  REF: https://stackoverflow.com/questions/57500713/xml-parsing-on-spark-structured-streaming
+
+  # sample XML text:
+
+    x1 = r'''<root>
+      <users>
+        <user>
+              <account>1234</account>
+              <name>name_1</name>
+              <number>34233</number>
+         </user>
+         <user>
+              <account>58789</account>
+              <name>name_2</name>
+              <number>54697</number>
+         </user>    
+       </users>
+    </root>'''
+
+    df = spark.createDataFrame([(x1,)],['xml_data'])
+
+ (1) retrieve a list of elements:
+    # retrieve all into an array of strings
+    df.selectExpr("xpath(xml_data, '//number/text()') AS all_numbers").show()
+    +--------------+
+    |   all_numbers|
+    +--------------+
+    |[34233, 54697]|
+    +--------------+
+
+    df.selectExpr("""xpath(xml_data, '//user//text()')""").show(truncate=False)
+    +----------------------------------+
+    |xpath(xml_data, //user//text())   |
+    +----------------------------------+
+    |[
+                  , 1234, 
+                  , name_1, 
+                  , 34233, 
+             , 
+                  , 58789, 
+                  , name_2, 
+                  , 54697, 
+             ]|
+    +----------------------------------+
+
+
+ (2) aggregations:
+    # retrieve sum of number for all account with at least 5 digit
+    df.selectExpr("xpath_double(xml_data, 'sum(//user[account>=10000]/number)') AS sum_account_ge_10000").show()
+    +--------------------+
+    |sum_account_ge_10000|
+    +--------------------+
+    |             54697.0|
+    +--------------------+
+
+    # sum of account + sum of number
+    df.selectExpr("xpath_double(xml_data, 'sum(//number|//account)') AS sum_two_elements").show()
+    +----------------+
+    |sum_two_elements|
+    +----------------+
+    |        148953.0|
+    +----------------+
+
+    # calculate average of numbers
+    df.selectExpr("""xpath_double(xml_data, 'sum(//number) div count(//number)') as number_avg""").show()
+    +----------+
+    |number_avg|
+    +----------+
+    |   44465.0|
+    +----------+
+
+ (3) String operations:
+
+    # translate()
+    df.selectExpr("""xpath_string(xml_data, 'translate(//name, "abc", "ABC")')""").show()
+    +-------------------------------------------------------+
+    |xpath_string(xml_data, translate(//name, "abc", "ABC"))|
+    +-------------------------------------------------------+
+    |                                                 nAme_1|
+    +-------------------------------------------------------+
+
+    # concat()
+    df.selectExpr("""xpath_string(xml_data, 'concat(//user[2]/name, //user[2]/account)') as user2_account""").show()
+    +-------------+
+    |user2_account|
+    +-------------+
+    |  name_258789|
+    +-------------+
+
+* Available XPath functions:
+  https://developer.mozilla.org/en-US/docs/Web/XPath/Functions
+ (1) sum()
+ (2) count()
+ (3) ceiling() / floor()
+ (4) round()
+ (5) contains(), concat(), translate(), substring()
+
+
+Reference to XPath operators:
++ https://www.w3schools.com/xml/xpath_operators.asp
++ https://developer.mozilla.org/en-US/docs/Web/XPath/Functions
++ node(), text()
+https://www.w3schools.com/xml/xpath_axes.asp
+
+Other XML related topics with Spark
+https://stackoverflow.com/questions/33078221/xml-processing-in-spark
+
+
+Example-1: after some preprocessing and then use xpath to retrieve attribute
+  REF: https://stackoverflow.com/questions/58704887
+  Note: this only works if the xmls are all valid XML(or can be easily converted into valid XMLs) and on their own line. 
+
+    txt = """ <row AcceptedAnswerId="88156" AnswerCount="6" Body="&lt;p&gt;I\'ve just played a game with my kids that basically boils down to: whoever rolls every number at least once on a 6-sided dice wins.&lt;/p&gt;&#10;&#10;&lt;p&gt;I won, eventually, and the others finished 1-2 turns later. Now I\'m wondering: what is the expectation of the length of the game?&lt;/p&gt;&#10;&#10;&lt;p&gt;I know that the expectation of the number of rolls till you hit a specific number is &#10;$\\sum_{n=1}^\\infty n\\frac{1}{6}(\\frac{5}{6})^{n-1}=6$.&lt;/p&gt;&#10;&#10;&lt;p&gt;However, I have two questions:&lt;/p&gt;&#10;&#10;&lt;ol&gt;&#10;&lt;li&gt;How many times to you have to roll a six-sided dice until you get every number at least once? &lt;/li&gt;&#10;&lt;li&gt;Among four independent trials (i.e. with four players), what is the expectation of the &lt;em&gt;maximum&lt;/em&gt; number of rolls needed? [note: it\'s maximum, not minimum, because at their age, it\'s more about finishing than about getting there first for my kids]&lt;/li&gt;&#10;&lt;/ol&gt;&#10;&#10;&lt;p&gt;I can simulate the result, but I wonder how I would go about calculating it analytically.&lt;/p&gt;&#10;&#10;&lt;hr&gt;&#10;&#10;&lt;p&gt;Here\'s a Monte Carlo simulation in Matlab&lt;/p&gt;&#10;&#10;&lt;pre&gt;&lt;code&gt;mx=zeros(1000000,1);&#10;for i=1:1000000,&#10;   %# assume it\'s never going to take us &amp;gt;100 rolls&#10;   r=randi(6,100,1);&#10;   %# since R2013a, unique returns the first occurrence&#10;   %# for earlier versions, take the minimum of x&#10;   %# and subtract it from the total array length&#10;   [~,x]=unique(r); &#10;   mx(i,1)=max(x);&#10;end&#10;&#10;%# make sure we haven\'t violated an assumption&#10;assert(~any(mx==100))&#10;&#10;%# find the expected value for the coupon collector problem&#10;expectationForOneRun = mean(mx)&#10;&#10;%# find the expected number of rolls as a maximum of four independent players&#10;maxExpectationForFourRuns = mean( max( reshape( mx, 4, []), [], 1) )&#10;&#10;expectationForOneRun =&#10;   14.7014 (SEM 0.006)&#10;&#10;maxExpectationForFourRuns =&#10;   21.4815 (SEM 0.01)&#10;&lt;/code&gt;&lt;/pre&gt;&#10;" CommentCount="5" CreationDate="2013-01-24T02:04:12.570" FavoriteCount="9" Id="48396" LastActivityDate="2014-02-27T16:38:07.013" LastEditDate="2013-01-26T13:53:53.183" LastEditorUserId="198" OwnerUserId="198" PostTypeId="1" Score="23" Tags="&lt;probability&gt;&lt;dice&gt;" Title="How often do you have to roll a 6-sided dice to obtain every number at least once?" ViewCount="5585" />',
+     '  <row AnswerCount="1" Body="&lt;p&gt;Suppose there are $6$ people in a population. During $2$ weeks $3$ people get the flu. Cases of the flu last $2$ days. Also people will get the flu only once during this period. What is the incidence density of the flu?&lt;/p&gt;&#10;&#10;&lt;p&gt;Would it be $\\frac{3}{84 \\text{person days}}$ since each person is observed for $14$ days?&lt;/p&gt;&#10;" CommentCount="4" CreationDate="2013-01-24T02:23:13.497" Id="48397" LastActivityDate="2013-04-24T16:58:18.773" OwnerUserId="20010" PostTypeId="1" Score="1" Tags="&lt;epidemiology&gt;" Title="Incidence density" ViewCount="288" />',
+    """
+
+    # read file in line mode, we get one column with column_name = 'value'
+    df = spark.read.csv(sc.parallelize(txt.split('\n')), sep='\n', schema="value string")
+    
+    # trim the leading and trailing commas, single-quotes and spaces, 
+    # take the XPATH `row//@CommentCount` which is the value of CommentCount attribute under the row tag, 
+    # this will get an array column of matched attribute values:
+    df.selectExpr('''xpath(trim(both ",' " from value), "row//@CommentCount") as CommentCount''').show()   
+    +------------+
+    |CommentCount|
+    +------------+
+    |         [5]|
+    |         [4]|
+    +------------+
+
+    #then take the sum on the first element of each array:
+    df.selectExpr('''
+        sum(xpath(trim(both ",' " from value), "row//@CommentCount")[0]) as sum_CommentCount
+    ''').show()
+    +----------------+
+    |sum_CommentCount|
+    +----------------+
+    |             9.0|
+    +----------------+
+
+
