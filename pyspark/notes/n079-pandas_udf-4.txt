@@ -147,9 +147,9 @@ Example-14: Google Translate ajax API implementation class <-- use Iterator[pd.S
           we have to create an instance of Translator to use Google Translator API
     
     df = spark.createDataFrame([
-      ("Salutare",),
-      ("buongiorno",),
-      ("buongiorno ho",)
+      ("Das h?tte ich gerne als Poster",),
+      ("Sooo schoen",),
+      ("durchaus m?glich",)
     ],['sentence'])
     
     from googletrans import Translator
@@ -163,12 +163,64 @@ Example-14: Google Translate ajax API implementation class <-- use Iterator[pd.S
       for s in iterator:
         yield pd.Series([ translator.translate(x, dest='en', src='auto').text for x in s ])
     
-    df.withColumn('new_sentenct', text_translate('sentence')).show()
-    +-------------+-------------------+                                             
-    |     sentence|       new_sentenct|
-    +-------------+-------------------+
-    |     Salutare|           To greet|
-    |   buongiorno|       good morning|
-    |buongiorno ho|good morning I have|
-    +-------------+-------------------+
+    df.withColumn('new_sentenct', text_translate('sentence')).show(10,0)
+    +------------------------------+-----------------------------+
+    |sentence                      |new_sentenct                 |
+    +------------------------------+-----------------------------+
+    |Das h?tte ich gerne als Poster|I would like that as a poster|
+    |Sooo schoen                   |Sooo nice                    |
+    |durchaus m?glich              |quite possible               |
+    +------------------------------+-----------------------------+
+
+
+
+Example-15: split array into chunks and get the list of the sums on these chucks
+  REF: https://stackoverflow.com/q/64873861/9510729
+  Task: 
+    (1) isolate each fileds from json_string using json_tuple or from_json
+    (2) retrieve indices and values from an JSON string using pd.Series.findall
+    (3) use np.zeros to help reindex the np.array to 144 elements
+    (4) use np_array_split, np_sum(axis=1) to split np.array to 24 chunks and then do sum
+
+  Code: for Spark 2.3.1
     
+    from pyspark.sql import functions as F
+    
+    j1 = """{"name": "abc1", "usage_count": {"bin102": 1, "bin103": 1, "bin104": 1, "bin105": 1, "bin110": 1, "bin112": 
+        1, "bin120": 1, "bin121": 1, "bin122": 1, "bin123": 1, "bin124": 1, "bin136": 2, "bin137": 1, "bin138": 1, "bin139":
+         1, "bin140": 1, "bin141": 2, "bin142": 2}, "usage_min": {"bin102": 7.7, "bin103": 10, "bin104": 10, "bin105": 2.5, 
+        "bin110": 0.1, "bin112": 0.8, "bin120": 6.8, "bin121": 10, "bin122": 10, "bin123": 10, "bin124": 4.3, "bin136": 2.5,
+         "bin137": 10, "bin138": 10, "bin139": 10, "bin140": 10, "bin141": 9.3, "bin142": 3.8}, "p_name": "abc_1"}
+    """
+    df = spark.createDataFrame([(j1,),(None,)],['e_data'])
+
+    # set up pandas_udf:
+    def _pandas_bin_sum(s,N):
+      ret = []
+      for x in map(np.array, s.str.findall(r'"bin(\d+)":([\d.]+)')):
+        try: 
+          z = np.zeros(144)
+          z[x[:,0].astype(np.int)] = x[:,1].astype(np.float)
+          ret.append([ float(e) for e in np.sum(np.array_split(z,N),axis=1) ])
+        except:
+          ret.append(None)
+      return pd.Series(ret)
+
+    pandas_bin_sum = F.pandas_udf(lambda x: _pandas_bin_sum(x,24), "array<float>")
+
+    df1.withColumn('usage_count', F.concat_ws(',', pandas_bin_sum('usage_count').astype("array<int>"))) \
+        .withColumn('usage_min', F.concat_ws(',', pandas_bin_sum('usage_min'))) \
+        .show(2,100,vertical=True)
+    -RECORD 0----------------------------------------------------------------------------------------------------------
+     name        | abc1                                                                                                
+     p_name      | abc_1                                                                                               
+     usage_count | 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,2,0,5,0,3,7                                                     
+     usage_min   | 0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,30.2,0.9,0.0,41.1,0.0,12.5,43.1 
+    -RECORD 1----------------------------------------------------------------------------------------------------------
+     name        | null                                                                                                
+     p_name      | null                                                                                                
+     usage_count |                                                                                                     
+     usage_min   |
+
+
+
