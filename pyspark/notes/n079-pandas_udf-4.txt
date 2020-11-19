@@ -182,7 +182,7 @@ Example-15: split array into chunks and get the list of the sums on these chucks
     (3) use np.zeros to help reindex the np.array to 144 elements
     (4) use np_array_split, np_sum(axis=1) to split np.array to 24 chunks and then do sum
 
-  Code: for Spark 2.3.1
+  Code: for Spark 2.3.0
     
     from pyspark.sql import functions as F
     
@@ -193,6 +193,16 @@ Example-15: split array into chunks and get the list of the sums on these chucks
          "bin137": 10, "bin138": 10, "bin139": 10, "bin140": 10, "bin141": 9.3, "bin142": 3.8}, "p_name": "abc_1"}
     """
     df = spark.createDataFrame([(j1,),(None,)],['e_data'])
+
+    cols = ["name", "p_name", "usage_count", "usage_min"]
+
+    df1 = df.select(F.json_tuple("e_data", *cols).alias(*cols))
+    df1.printSchema()
+    #root
+    # |-- name: string (nullable = true)
+    # |-- p_name: string (nullable = true)
+    # |-- usage_count: string (nullable = true)
+    # |-- usage_min: string (nullable = true)
 
     # set up pandas_udf:
     def _pandas_bin_sum(s,N):

@@ -293,3 +293,14 @@ Troubleshooting:
   (3) Error: pyarrow.lib.ArrowInvalid: 'utf-32-le' codec can't decode bytes in position 0-3: code point not in range(0x110000)
     Ans: due to the actual return type does not match the one specified in schema,
     REF: https://www.mail-archive.com/issues@arrow.apache.org/msg30138.html
+
+  (4) ERROR: pandas_udf java.lang.IllegalArgumentException
+        py4j.protocol.Py4JJavaError: An error occurred while calling o62.collectAsArrowToPython
+  Reason: pandas_udf with older version Spark (2.3.0) not working with latest pyarrow release(0.15.0)
+  Resolve: vim $SPARK_HOME/conf/spark-env.sh and then append the following line:
+
+        ARROW_PRE_0_15_IPC_FORMAT=1
+
+  REF: https://issues.apache.org/jira/browse/SPARK-29367
+
+
