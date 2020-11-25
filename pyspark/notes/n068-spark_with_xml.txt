@@ -9,7 +9,9 @@ Sample-1: Load XML, sample https://docs.microsoft.com/en-us/previous-versions/wi
 
   """Load XML into spaek dataframe:
   (1) can also use `.format('xml')` to replace `.format("com.databricks.spark.xml")`
-  (2)  must specify `rowTag` to form the Row object in DataFrame
+  (2) must specify `rowTag` to form the Row object in DataFrame
+  (3) for multiple files, use shell glob, for example:
+        df = spark.read.format("xml").options(..)..load(','.join(list_of_files))
   """
 
     df = spark.read.format("com.databricks.spark.xml") \
@@ -195,7 +197,7 @@ Other XML related topics with Spark
 https://stackoverflow.com/questions/33078221/xml-processing-in-spark
 
 
-Example-1: after some preprocessing and then use xpath to retrieve attribute
+Example-2: after some preprocessing and then use xpath to retrieve attribute
   REF: https://stackoverflow.com/questions/58704887
   Note: this only works if the xmls are all valid XML(or can be easily converted into valid XMLs) and on their own line. 
 
@@ -226,5 +228,46 @@ Example-1: after some preprocessing and then use xpath to retrieve attribute
     +----------------+
     |             9.0|
     +----------------+
+
+
+
+Example-3: parsing XML using wildcard `@*` all properties flattened into one list
+  REF:https://stackoverflow.com/q/64934508/9510729
+
+    x = """<?xml version="1.0" encoding="utf-8"?> <visitors> <visitor id="9615" age="68" sex="F" /> <visitor id="1882" age="34" sex="M" /> <visitor id="5987" age="23" sex="M" /> </visitors>"""
+
+    df = spark.createDataFrame([(x,)],["visitors"])
+
+  Method-1: using wildcard @*:, the values are sorted alpha-order by attribute names. 
+            this only applies when all attributes shown in every visitor tag.
+
+    df_new = df.selectExpr("""xpath(visitors,'//visitor/@*') as t""") \
+        .selectExpr("""inline(
+          transform(sequence(0,int(size(t)/3-1)), i -> (int(t[i*3]) as age, int(t[i*3+1]) as id, t[i*3+2] as sex))
+         )""")
+    df_new.show()
+    +---+----+---+                                                                  
+    |age|  id|sex|
+    +---+----+---+
+    | 68|9615|  F|
+    | 34|1882|  M|
+    | 23|5987|  M|
+    +---+----+---+
+
+  Method-2: check each arrebute separately ansd then arrays_zip
+
+    cols = ['id', 'age', 'sex']
+    df_new = df.selectExpr([f"xpath(visitors,'//visitor/@{c}') as {c}" for c in cols]) \
+        .selectExpr(f"inline(arrays_zip({','.join(cols)}))")
+    df_new.show()
+    +----+---+---+
+    |  id|age|sex|
+    +----+---+---+
+    |9615| 68|  F|
+    |1882| 34|  M|
+    |5987| 23|  M|
+    +----+---+---+
+
+
 
 
