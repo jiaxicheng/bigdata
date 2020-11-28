@@ -137,5 +137,15 @@ Notes:
 
    https://cwiki.apache.org/confluence/display/Hive/LanguageManual+UDF#LanguageManualUDF-get_json_object 
 
+   JSON Path implementation with Scala:
+   https://github.com/apache/spark/blob/master/sql/catalyst/src/main/scala/org/apache/spark/sql/catalyst/expressions/jsonExpressions.scala#L54
+
+   the child expression: .name or ['name'], name could be either 
+     (1) single-quoted `name` enclosed by brackets, or 
+     (2) a dot followed by a string without containing any dot and opening bracket
+
+   Notice: F.get_json_object('_1', "$['element name']") works
+           F.get_json_object('_1', "$.element name") works
+           F.get_json_object('_1', '$["element name"]') does not work
 
 
