@@ -68,10 +68,29 @@ SELECT [hints, ...] [ALL|DISTINCT] named_expression[, named_expression, ...]
 
         IF(coalesce(col1, col2, col3, col4) is NULL, 'val1', 'val2')
 
+       Note: check if any column is NULL:  IF(concat(col1, col2, col3, col4) is NULL, 'v1', 'v2')
+
    (2) filter by if (A <=> B) | (A is NULL) | (B is NULL), using coalesce() or nvl()
 
-        df.where('coalesce(A, B) <=> coalesce(B, A)')    <-- cover A is NULL, B is NULL and A <=> B
+        df.where('coalesce(A, B) <=> coalesce(B, A)')    <-- A is NULL or B is NULL or A <=> B
+        df.where('nvl(A, B) <=> nvl(B, A)')
         df.filter('nullif(A, B) is NULL')                <-- doesnot cover `B is NULL`
+
+
++ HAVING:
+  + must work with GROUPBY
+  + Window functions can not be used in WHERE or HAVING clause, i.e. the following is invalid:
+
+        HAVING row_number() OVER (Partition By Name, Class ORDER BY tmp_col DESC, Time DESC) = 1
+    ERROR: grouping expressions sequence is empty, and 't1.`Name`' is not an aggregate function.
+
+     or
+
+     SELECT *, row_number() OVER (Partition By Name, Class ORDER BY tmp_col DESC, Time DESC) as rn
+     WHERE rn = 1
+
+    ERROR: org.apache.spark.sql.AnalysisException: cannot resolve '`rn`' given input columns: 
+           
 
       
 
@@ -117,6 +136,20 @@ SELECT [hints, ...] [ALL|DISTINCT] named_expression[, named_expression, ...]
      is the same as:
        GROUP BY c1, c2 GROUPING SETS ((a,b), (a), (b), ())
 
+  + PIVOT: supported since spark 2.4+
+    REF: https://databricks.com/blog/2018/11/01/sql-pivot-converting-rows-to-columns.html
+
+    /* Note: all columns from the below subquery except those shown in PIVOT's FROM and aggregate fields 
+     * will be add to an implicit GROUP BY 
+     */ 
+    SELECT * FROM (
+      SELECT year(funding_date) as year, funding_amount
+      FROM funding_all 
+      WHERE provider_id IN (1,2,5)
+    ) PIVOT (
+      ROUND(avg(funding_amount),2)
+      FROM year in (2016, 2017, 2018, 2019)     <-- can dd alias, i.e.:  2019 prev_year
+    )
 
 
 + Window Functions:
@@ -148,7 +181,27 @@ SELECT [hints, ...] [ALL|DISTINCT] named_expression[, named_expression, ...]
        ) 
   Notes:
    (1) Window Spec `w1` must be applied to an aggregate function, see example: `collect_set(purchaseYear) OVER w1`
-       
+   (2) For a Window Span all dataframe:
+
+        SELECT sum(price) OVER (PARTITION BY 1) 
+        FROM table
+
+   (3) current_row or related rows: On a Window aggregate function, col_1, col_2 names are associated with
+       their corrsponding rows, not the current row. thus the below list will return identical for all rows.
+       REF: https://stackoverflow.com/questions/58942896/spark-filter-withcolumn-using-row-values
+
+         df.withColumn('list', expr('''
+             collect_list(IF(col_1 is NULL, NULL, IF(price_list between col_1 and col_2, 1, 0))) OVER (PARTITION BY 1)
+            '''))\ 
+           .show(10,0) 
+        
+       To put the filter on the values of col_1 and col_2 of the current rows, need to do two steps: first collect
+       list of price_list and then filter and count:
+
+         df.withColumn('list', expr('collect_list(IF(col_1 is NULL, NULL, price_list)) OVER (PARTITION BY 1)'))\ 
+           .withColumn('cnt', expr('size(filter(list, x -> x between col_1 and col_2))')) \ 
+           .show() 
+
 
 
 + Hints: 
@@ -169,11 +222,13 @@ SELECT [hints, ...] [ALL|DISTINCT] named_expression[, named_expression, ...]
         SELECT /* BROADCASTJOIN(b) */ ...
         SELECT /* BROADCAST(b) */ ...
 
-    + SKEW('tbl_name')       skew join
+      Note: tbl_name should be the alias_name if exists(ref: https://stackoverflow.com/questions/62622742).
+
+    + SKEW('tbl_name')       skew join         # databricks only
       data skew, unevenly distributed among partitions in the cluster
       need the name of the relation(a table, view or subquery) with skew.
       https://docs.databricks.com/delta/join-performance/skew-join.html
-    + RANGE_JOIN(tbl_name, bin_size)
+    + RANGE_JOIN(tbl_name, bin_size)           # databricks only
       + applied to any join with a range condition (i.e. between, >, <), selecting bin_size is important
       + all values involved must be numeric types
       + range condition must be compared between the same data type
