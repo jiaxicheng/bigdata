@@ -402,3 +402,33 @@ Spark SQL higher-order functions:
     |1234|[[2010, London], [2012, Berlin]]|
     +----+--------------------------------+
 
+
+
+(41) use transform + array_except to do combinations of two arrays
+    REF: https://stackoverflow.com/q/64791167/9510729
+    Targets: for size of arrays including Set of 3 numbers, create a new array of size-4
+      which must satisfy both two original arrays are subset of the new array.
+    Method: use array_except to find element from element_1 but not in element_2
+            use transform to append each to element_2 using concat + array
+            do the same to the other direction and then union two arrays
+    
+    df = spark.createDataFrame([
+      ([1, 4, 3],[3, 4, 5]), ([2, 1, 3], [1, 0, 2]), ([4, 3, 1], [3, 5, 6])
+    ], ['elements_1','elements_2'])
+    
+    df_new = df.selectExpr("*", """
+        array_union(
+          transform(array_except(elements_1,elements_2),x -> concat(elements_2,array(x))),
+          transform(array_except(elements_2,elements_1),x -> concat(elements_1,array(x)))
+        ) as flag""")
+    
+    df_new.show(10,0)
+    +----------+----------+--------------------------------------------------------+
+    |elements_1|elements_2|flag                                                    |
+    +----------+----------+--------------------------------------------------------+
+    |[1, 4, 3] |[3, 4, 5] |[[3, 4, 5, 1], [1, 4, 3, 5]]                            |
+    |[2, 1, 3] |[1, 0, 2] |[[1, 0, 2, 3], [2, 1, 3, 0]]                            |
+    |[4, 3, 1] |[3, 5, 6] |[[3, 5, 6, 4], [3, 5, 6, 1], [4, 3, 1, 5], [4, 3, 1, 6]]|
+    |[1, 2, 3] |[3, 4, 5] |[[3, 4, 5, 1], [3, 4, 5, 2], [1, 2, 3, 4], [1, 2, 3, 5]]|
+    +----------+----------+--------------------------------------------------------+
+    
