@@ -432,3 +432,62 @@ Spark SQL higher-order functions:
     |[1, 2, 3] |[3, 4, 5] |[[3, 4, 5, 1], [3, 4, 5, 2], [1, 2, 3, 4], [1, 2, 3, 5]]|
     +----------+----------+--------------------------------------------------------+
     
+
+
+(42) find Last N unique elements from an Array using aggregate function
+  REF: https://stackoverflow.com/q/65290397/9510729
+  Method: iterate through `list` and save only unique `x`, skip duplicates.
+
+    df = spark.sql(""" with t1( 
+        select 0 as index, "F" as x  union all
+        select 1,"F,B" as x  union all
+        select 2,"F,B,A" as x  union all
+        select 3,"F,B,A,F" as x  union all
+        select 4,"F,B,A,F,B" as x  union all
+        select 5,"F,B,A,F,B,G" as x  union all
+        select 6,"F,B,A,F,B,G,E" as x  union all
+        select 7,"F,B,A,F,B,G,E,F" as x  union all
+        select 8,"F,B,A,F,B,G,E,F,E" as x  union all
+        select 9,"F,B,A,F,B,G,E,F,E,B" as x  union all
+        select 10,"F,B,A,F,B,G,E,F,E,B,A" as x  union all
+        select 11,"F,B,A,F,B,G,E,F,E,B,A,D" as x  union all
+        select 12,"F,B,A,F,B,G,E,F,E,B,A,D,F" as x  union all
+        select 13,"F,B,A,F,B,G,E,F,E,B,A,D,F,E" as x  union all
+        select 14,"F,B,A,F,B,G,E,F,E,B,A,D,F,E,E" as x  union all
+        select 15,"F,B,A,F,B,G,E,F,E,B,A,D,F,E,E,D" as x  
+      ) select index, split(x,',') as list from t1
+    """)
+
+    df.selectExpr("*", """
+      aggregate(
+        /* expr: reverse of list */
+        reverse(list),
+        /* start: zero value as empty array of strings */
+        CAST(array() as array<string>),
+        /* merge: add x into acc only if x does not exists in acc */
+        (acc,x) -> IF(array_contains(acc,x),acc,concat(acc,array(x))),
+        /* finish: take the first 5 element and sort the list */
+        acc -> sort_array(slice(acc,1,5))
+      ) as window """).show(16,0)
+    +-----+------------------------------------------------+---------------+
+    |index|list                                            |window         |
+    +-----+------------------------------------------------+---------------+
+    |0    |[F]                                             |[F]            |
+    |1    |[F, B]                                          |[B, F]         |
+    |2    |[F, B, A]                                       |[A, B, F]      |
+    |3    |[F, B, A, F]                                    |[A, B, F]      |
+    |4    |[F, B, A, F, B]                                 |[A, B, F]      |
+    |5    |[F, B, A, F, B, G]                              |[A, B, F, G]   |
+    |6    |[F, B, A, F, B, G, E]                           |[A, B, E, F, G]|
+    |7    |[F, B, A, F, B, G, E, F]                        |[A, B, E, F, G]|
+    |8    |[F, B, A, F, B, G, E, F, E]                     |[A, B, E, F, G]|
+    |9    |[F, B, A, F, B, G, E, F, E, B]                  |[A, B, E, F, G]|
+    |10   |[F, B, A, F, B, G, E, F, E, B, A]               |[A, B, E, F, G]|
+    |11   |[F, B, A, F, B, G, E, F, E, B, A, D]            |[A, B, D, E, F]|
+    |12   |[F, B, A, F, B, G, E, F, E, B, A, D, F]         |[A, B, D, E, F]|
+    |13   |[F, B, A, F, B, G, E, F, E, B, A, D, F, E]      |[A, B, D, E, F]|
+    |14   |[F, B, A, F, B, G, E, F, E, B, A, D, F, E, E]   |[A, B, D, E, F]|
+    |15   |[F, B, A, F, B, G, E, F, E, B, A, D, F, E, E, D]|[A, B, D, E, F]|
+    +-----+------------------------------------------------+---------------+
+
+
