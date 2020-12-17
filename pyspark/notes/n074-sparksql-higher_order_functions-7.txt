@@ -166,8 +166,78 @@ Spark SQL higher-order functions:
     +-----+------------------------+------------------+
     #DataFrame[Index: bigint, finalArray: array<bigint>, new_vars: array<decimal(12,2)>]
 
+ Example-23-2:
+  REF:https://stackoverflow.com/q/64873861/9510729
+  Target: zip two lists which cover daily usage count and minutes, time is saved in key field with preceeding `bin`, 
+          say `bin012` is to 2AM (12*10 minutes), we want to do the hourly summary, which have N=6 chuck for 0-143 
+          potential bins. 
+  Method: use transform + sequence
 
-
+    from pyspark.sql import functions as F
+    
+    j1 = """{"name": "abc1", "usage_count": {"bin102": 1, "bin103": 1, "bin104": 1, "bin105": 1, "bin110": 1, "bin112": 
+        1, "bin120": 1, "bin121": 1, "bin122": 1, "bin123": 1, "bin124": 1, "bin136": 2, "bin137": 1, "bin138": 1, "bin139":
+         1, "bin140": 1, "bin141": 2, "bin142": 2}, "usage_min": {"bin102": 7.7, "bin103": 10, "bin104": 10, "bin105": 2.5, 
+        "bin110": 0.1, "bin112": 0.8, "bin120": 6.8, "bin121": 10, "bin122": 10, "bin123": 10, "bin124": 4.3, "bin136": 2.5,
+         "bin137": 10, "bin138": 10, "bin139": 10, "bin140": 10, "bin141": 9.3, "bin142": 3.8}, "p_name": "abc_1"}
+    """
+    
+    rdd = sc.parallelize([j1])
+    
+    df = spark.read.json(rdd, schema="name string, p_name string, usage_count map<string,int>, usage_min map<string,float>")
+    
+    df = spark.createDataFrame([(j1,)],['e_data'])
+    
+    schema = "name string, p_name string, usage_count map<string,int>, usage_min map<string,float>"
+    
+    df0 = df.withColumn("e_data", F.from_json("e_data", schema)).select("*", "e_data.*").drop("e_data")
+    +----+------+--------------------+--------------------+
+    |name|p_name|         usage_count|           usage_min|
+    +----+------+--------------------+--------------------+
+    |abc1| abc_1|[bin102 -> 1, bin...|[bin102 -> 7.7, b...|
+    +----+------+--------------------+--------------------+
+    
+    # merge usage_count and usage_min into a single map, remove `bin` from keys
+    df1 = df0.withColumn("map1", F.expr("""
+        map_from_entries(
+          transform(map_keys(usage_count), k -> 
+            struct(int(substr(k,4)), named_struct('count', usage_count[k], 'min', usage_min[k]))
+          )
+        )
+    """))
+    df1.show(1,80,vertical=True)
+    -RECORD 0---------------------------------------------------------------------------------------
+     name        | abc1                                                                             
+     p_name      | abc_1                                                                            
+     usage_count | [bin102 -> 1, bin103 -> 1, bin104 -> 1, bin105 -> 1, bin110 -> 1, bin112 -> 1... 
+     usage_min   | [bin102 -> 7.7, bin103 -> 10.0, bin104 -> 10.0, bin105 -> 2.5, bin110 -> 0.1,... 
+     map1        | [102 -> [1, 7.7], 103 -> [1, 10.0], 104 -> [1, 10.0], 105 -> [1, 2.5], 110 ->...
+    
+    # iterating through 0-23 and split the bins into 6 elements each and use aggregate to sum the count/minute
+    df2 = df1.withColumn("usage", F.expr("""
+        transform(sequence(0,23), i ->
+          aggregate(
+            sequence(i*6,(i+1)*6-1), 
+            (0L as count, 0D as min),
+            (acc, x) -> named_struct(
+               'count', acc.count + ifnull(map1[x].count,0),
+               'min', acc.min + ifnull(map1[x].min,0.0)
+            ),
+            acc -> (acc.count as count, round(acc.min,1) as min)
+          )
+        )
+    """))
+    
+    # format the output count and min
+    df_new = df2.selectExpr("name","p_name","array_join(usage.count, ',') as count", "array_join(usage.min, ',') as min")
+    
+    df_new.show(1,0,vertical=True)
+    #-RECORD 0-----------------------------------------------------------------------------------------------------
+    # name   | abc1                                                                                                
+    # p_name | abc_1                                                                                               
+    # count  | 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,2,0,5,0,3,7                                                     
+    # min    | 0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,30.2,0.9,0.0,41.1,0.0,12.5,43.1 
+    
 
 (24) use aggregate + map_concat to merge a array of maps into a map
   REF: https://stackoverflow.com/questions/60629812/how-to-convert-map-values-using-spark-built-in-functions/60646490#60646490
