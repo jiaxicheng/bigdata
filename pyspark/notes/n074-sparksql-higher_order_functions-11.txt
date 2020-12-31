@@ -1,0 +1,41 @@
+Continue..
+
+Spark SQL higher-order functions:
+
+---
+(43) aggregate function set calculated value in a struct field of accumulator
+  REF: https://stackoverflow.com/q/65515349/9510729
+  Issue: any null elements in the `col` array will result in the null value for the whole calculation
+    using the below aggregate function, to overcome this we need to use coalesce while reset size of the
+    array elements to exclude null:
+
+  Not working:
+
+    power_mean = lambda col: func.expr(f"""
+        aggregate(`{col}`, 0D, (acc,x) -> acc+power(x, 2*size(`{col}`)), acc -> power(acc/size(`{col}`),0.5/size(`{col}`)))
+    """)
+
+  Working solution:
+    
+    power_mean = lambda col: func.expr(f"""
+        aggregate(
+          /* expr: array column to iterate through */
+          `{col}`,
+          /* start: set zero value and accumulator as an struct<psum:double,n:int> */
+          (0D as psum, size(filter(`{col}`, x -> x is not null)) as n),
+          /* merge: iterate through expr and calculate `sum([(x)**p for x in values])` */
+          (acc,x) -> (acc.psum+power(coalesce(x,0),2*acc.n) as psum, acc.n as n),
+          /* finish: post processing */
+          acc -> power(acc.psum/acc.n, 0.5/acc.n)
+        )
+    """)
+    
+    df = spark.createDataFrame([([20,5,None,10],)],['value'])
+    df.select("value", power_mean("value").alias('totalScore')).show(truncate=False)
+    +------------+------------------+
+    |value       |totalScore        |
+    +------------+------------------+
+    |[20, 5,, 10]|16.697421658984894|
+    +------------+------------------+
+    
+
