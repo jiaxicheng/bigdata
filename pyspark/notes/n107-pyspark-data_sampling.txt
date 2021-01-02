@@ -1,0 +1,127 @@
+Data sampling under different context:
+
+
+
+pyspark.RDD:
+---
+  + randomSplit(weights, seed=None)
+    + withReplacement = False
+    + weights willbe normalized so the sum becomes 1.0
+  + sample(withReplacement, fraction, seed=None)
+  + sampleByKey(withReplacement, fractions, seed=None)
+
+
+pyspark.sql.DataFrame:
+---
+  + randomSplit(weights, seed=None)
+  + sample(withReplacement=None, fraction=None, seed=None)
+  + sampleBy(col, fractions, seed=None)
+    + withReplacement = False
+
+
+pyspark.sql.DataFrameStatFunctions:
+---
+  + sampleBy(col, fractions, seed=None)
+  Notes:
+   (1) sample from a large dataset, take a fraction of a col-value 
+       for cat in categories:
+           model_fit(df.sampleBy('col', {cat:0.1}))
+      
+
+Spark SQL Block Sampling:   withReplacement=None
+---
+  + TABLESAMPLE(n PERCENT)
+
+    SELECT * FROM t_df TABLESAMPLE(0.1 PERCENT) t;
+
+  + TABLESAMPLE (n ROWS)
+    the row count given by user is applied to each split. So total row count can be vary by number of 
+    input splits. For example, the following query will take the first 10 rows from each input split:
+
+      SELECT * FROM t_df TABLESAMPLE(10 ROWS) t;
+
+  + TABLESAMPLE (ByteLengthLiteral)  <-- Only work with Apache Hive (not Spark SQL)
+    + ByteLengthLiteral: (digit) + ('b' | 'B' | 'k' | 'K' | 'm' | 'M' | 'g' | 'G')
+    
+      SELECT * FROM t_df TABLESAMPLE(100M) t;
+
+Notes:
+ (1) SparkSQL can take sample by exact # of Rows. 
+     ref: https://cwiki.apache.org/confluence/display/Hive/LanguageManual+Sampling
+     Need more knowledge regarding split and #Rows
+ (2) Spark will merge partition as much as possible by using `TABLESAMPLE(10 ROWS)`
+
+       spark.range(100000, numPartitions=20).createOrReplaceTempView('sdf')
+       spark.sql("SELECT *, spark_partition_id()  from sdf TABLESAMPLE(10 ROWS)").rdd.getNumPartitions() -> 1
+       spark.sql("SELECT *, spark_partition_id()  from sdf").rdd.getNumPartitions()                      -> 20
+       #This returns exactly 10 rows
+
+
+
+Examples:
+---
+Example-1: stratified sample df.sampleBy using a column containing True, False and NULL
+  REF: https://stackoverflow.com/q/63827167/9510729
+       https://github.com/apache/spark/blob/master/sql/core/src/main/scala/org/apache/spark/sql/DataFrameStatFunctions.scala#L372
+  Note: From the source code, the parameter `fractions` is defined as `Map[T, Double]` and Map key can not be NULL
+        a solution is to convert this column into an IntegerType:
+
+      df_sample = df.withColumn('flag', expr("coalesce(int(match), 2)")) \
+          .sampleBy("flag", {0:0.3, 1:0.3, 2:0.3}) \
+          .drop("flag")
+
+
+Example-2: sample a subset of users
+  REF: https://stackoverflow.com/questions/58969157/recommendation-for-subset-of-users
+    ratio = 200000/32000000
+    df_users = df.select('user').distinct().sample(False, ratio)
+    df_new = df.join(df_users, on=['user'], how='left_semi')
+  Note: this is calculated by a fraction
+
+
+Example-3: sample a small snippet and then split the sample into chucks of 64 or 128, to process with pandas
+  REF: https://stackoverflow.com/q/60645256/9510729
+
+    data_sample = data_df.sample(True, 0.0000015)
+
+  then process data_sample using the following way:
+
+  Method-1: iterate through chucks and process them on the driver
+    """use repartition + glom + toLocalIterator
+    (1) use df.rdd.repartition(64) to split data_sample into 64 partitions
+    (2) use glom() to collect all RDD elements into a list
+    (3) use toLocalIterator() to send the lists to driver
+    (4) use pd.DataFrame.from_dict to convert partitioned Rows into pandas dataframe
+
+        pdf = pd.DataFrame([e.asDict() for e in it])
+
+    (5) do whatever required for the task
+    """
+    df = spark.range(50000).withColumn('rnd', F.rand())
+
+    for it in df.repartition(6,'rnd').rdd.glom().toLocalIterator():
+        pdf = pd.DataFrame([ e.asDict() for e in it ])
+        print(pdf.agg({'id':['count', 'sum', 'max', 'min']}))
+        print("=====")
+    Note: to process data on executor, use rdd.foreachPartition()
+
+  Method-2: use repartition + mapPartitionsWithIndex to process data on the executors
+            and return result as dataframe
+
+    def process_data(partition_id, it):
+      pdf = pd.DataFrame([e.asDict() for e in it])
+      d = pdf.agg({'id':['count', 'sum', 'max', 'min']})
+      yield Row(id=partition_id, **d.to_dict()["id"])
+
+    df.repartition(6,'rnd').rdd.mapPartitionsWithIndex(process_data).toDF().show()
+    +-----+---+-----+---+---------+
+    |count| id|  max|min|      sum|
+    +-----+---+-----+---+---------+
+    | 8236|  0|49994|  0|205301196|
+    | 8293|  1|49999| 22|205628252|
+    | 8452|  2|49995|  5|211076451|
+    | 8445|  3|49998|  6|212974837|
+    | 8202|  4|49992|  3|205591871|
+    | 8372|  5|49977|  1|209402393|
+    +-----+---+-----+---+---------+
+
