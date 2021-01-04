@@ -319,3 +319,52 @@ Example-4: split row into multiple rows based on change in consecutive values, f
     |  2|  null|  null|  null|  null|  null|   100|   100|   100|   100|
     +---+------+------+------+------+------+------+------+------+------+
 
+
+Example-5: slide/split rows into N-columns
+  REF: https://stackoverflow.com/q/64860731/9510729
+  Method: use array of array or array of structs and then explode:
+
+    from pyspark.sql.functions import struct, explode, array, col
+
+    df = spark.createDataFrame([
+        ('a', '150', '110', '130', '80', '136', '150', '190', '110', '150', '110', '130', '136', '100', '150', '190', '110'),
+        ('b', '100', '100', '130', '100', '136', '100', '160', '230', '122', '130', '15', '200', '100', '100', '136', '100'),
+    ], ['id', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16'])
+
+    # all columns except the first
+    cols = df.columns[1:]
+
+    # size of the splits
+    N = 6
+
+  Method-1: use array of arrays:
+
+    df_new = df.withColumn('dta', explode(array(*[ array(*cols[i:i+N]) for i in range(len(cols)-N+1) ]))) \
+        .select('id', *[ col('dta')[i].alias(str(i+1)) for i in range(N) ])
+    df_new.show()
+    +---+---+---+---+---+---+---+
+    | id|  1|  2|  3|  4|  5|  6|
+    +---+---+---+---+---+---+---+
+    |  a|150|110|130| 80|136|150|
+    |  a|110|130| 80|136|150|190|
+    |  a|130| 80|136|150|190|110|
+    |  a| 80|136|150|190|110|150|
+    |  a|136|150|190|110|150|110|
+    |  a|150|190|110|150|110|130|
+    |  a|190|110|150|110|130|136|
+    |  a|110|150|110|130|136|100|
+    |  a|150|110|130|136|100|150|
+    |  a|110|130|136|100|150|190|
+    |  a|130|136|100|150|190|110|
+    |  b|100|100|130|100|136|100|
+    +---+---+---+---+---+---+---+
+
+  Method-2: use array of struct:
+
+    df_new = df.withColumn('dta', array(*cols)) \
+        .selectExpr("id", f"""
+            inline(transform(sequence(0,{len(cols)-N}), i -> ({','.join(f'dta[i+{j}] as `{j+1}`' for j in range(N))})))
+          """)
+
+
+
