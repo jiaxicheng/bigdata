@@ -27,7 +27,7 @@ with ArrayType(), this can also be StructType or MapType.
     df = spark.createDataFrame([('(174, [7, 10, 56, 89, 156], [1.0, 1.0, 1.0, 1.0, 1.0])',)],['col'])
     # DataFrame[col: string]
 
-    df_new = df.withColumn('s', expr("split(substr(col,2,length(col)-2), ',\\\\s*(?=\\\\[)')")) \
+    df_new = df.withColumn('s', expr(r"split(substr(col,2,length(col)-2), ',\\s*(?=\\[)')")) \
       .selectExpr("""
           concat(
             '[{"type":0,"size":',
@@ -51,6 +51,18 @@ with ArrayType(), this can also be StructType or MapType.
      vec_json | [{"type":0,"size":174,"indices":[7, 10, 56, 89, 156],"values":[1.0, 1.0, 1.0, 1.0, 1.0]}] 
      features | (174,[7,10,56,89,156],[1.0,1.0,1.0,1.0,1.0])
 
+  Note: use split-pattern of `^\\(|,\\s*(?=\\[)|\\)$`, we can skip using `substr` function, but do access `size`, 
+        `indices` and `values` using s[1], s[2], s[3] instead of s[0], s[1], s[2]
+
+    df.withColumn('s', expr(r"split(col, '^\\(|,\\s*(?=\\[)|\\)$')")) \
+        .selectExpr("""'[{"type":0,"size":'||s[1]||',"indices":'||s[2]||',"values":'||s[3]||'}]' as vec_json""") \
+        .show(truncate=False)
+    +-----------------------------------------------------------------------------------------+
+    |vec_json                                                                                 |
+    +-----------------------------------------------------------------------------------------+
+    |[{"type":0,"size":174,"indices":[7, 10, 56, 89, 156],"values":[1.0, 1.0, 1.0, 1.0, 1.0]}]|
+    +-----------------------------------------------------------------------------------------+
+
 
 A more general way for StringType column mixed with strings from Sparse and Dense vectors:
 ---
@@ -63,7 +75,7 @@ A more general way for StringType column mixed with strings from Sparse and Dens
     ], ['col'])
     #DataFrame[col: string]
     
-    df_new = df.withColumn('s', expr("split(translate(col,'()',''), ',\\\\s*(?=\\\\[)')")) \
+    df_new = df.withColumn('s', expr(r"split(translate(col,'()',''), ',\\s*(?=\\[)')")) \
         .selectExpr("""
           IF(size(s)=1
            , '[{"type":1,"values":' || s[0] || '}]'
@@ -85,4 +97,28 @@ A more general way for StringType column mixed with strings from Sparse and Dens
     root
      |-- vec_json: string (nullable = true)
      |-- features: vector (nullable = true)
+
+
+Another example using split + from_json to retrieve data from String:
+  REF: https://stackoverflow.com/a/65452726/9510729
+
+    from pyspark.sql import functions as F
+    df = spark.createDataFrame([
+        ('ABC', '[66, [["AB", 10]]]'),('XYZ', '[66, [["XY", 10], ["YZ", 20]]]'),
+        ('DEF','[66, [["DE", 10], ["EF", 20], ["FG", 30]]]')
+    ], ['id', 'recs'])
+
+    df1 = df.withColumn('recs1', F.split('recs', ', (?=\[\[)|\]$')[1]) \
+        .withColumn('recs2', F.from_json('recs1', 'array<array<string>>'))
+    +---+------------------------------------------+------------------------------------+------------------------------+
+    |id |recs                                      |recs1                               |recs2                         |
+    +---+------------------------------------------+------------------------------------+------------------------------+
+    |ABC|[66, [["AB", 10]]]                        |[["AB", 10]]                        |[[AB, 10]]                    |
+    |XYZ|[66, [["XY", 10], ["YZ", 20]]]            |[["XY", 10], ["YZ", 20]]            |[[XY, 10], [YZ, 20]]          |
+    |DEF|[66, [["DE", 10], ["EF", 20], ["FG", 30]]]|[["DE", 10], ["EF", 20], ["FG", 30]]|[[DE, 10], [EF, 20], [FG, 30]]|
+    +---+------------------------------------------+------------------------------------+------------------------------+
+
+  Where the split-pattern `, (?=\[\[)|\]$` contains two sub-patterns: 
+   + `, (?=\[\[)`: comma followed by a SPACE which must be followed by two opening brackets
+   + `\]$`       : closing-bracked at the end of String
 
