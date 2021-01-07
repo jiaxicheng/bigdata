@@ -51,7 +51,7 @@ SELECT [hints, ...] [ALL|DISTINCT] named_expression[, named_expression, ...]
          + not allowed in SELECT, so in LATERAL VIEW
          + can not be nested, can not be used within another function
          + groupby, sortby, cluster by, distributed by are not supported
-   (2) split() can not be used in LATERAL VIEW, reason: split is expected to be a generator. 
+   (2) split() can not be used in LATERAL VIEW, reason: lateral view is expected to be a generator. 
        However, its class is org.apache.spark.sql.catalyst.expressions.StringSplit
        , which is not a generator.
 
@@ -61,6 +61,29 @@ SELECT [hints, ...] [ALL|DISTINCT] named_expression[, named_expression, ...]
            WITH d AS (SELECT *, from_json(arg3, 'array<struct<name:string,datetime:string,event:string>>') t FROM t_df) 
            SELECT d.arg1, d.arg2, d.arg3, e.* FROM d LATERAL VIEW OUTER inline(d.t) e 
        ''').show()  
+
+    Generators can also be set inside the SELECT list and access its values directly
+
+       spark.sql("""
+           select json_tuple(dta, 'a', 'b') as (a,b), 'get '||a as get_a
+           from values ('{"a":1,"b":2}'), ('{"a":3}') as (dta)
+       """).show(truncate=False)
+       +---+----+-----+
+       |a  |b   |get_a|
+       +---+----+-----+
+       |1  |2   |get 1|
+       |3  |null|get 3|
+       +---+----+-----+
+
+   which is the same as:
+
+       spark.sql("""
+           select a,b, 'get '||a as get_a
+           from values ('{"a":1,"b":2}'), ('{"a":3}') as (dta)
+           lateral view json_tuple(dta, 'a', 'b') as a,b
+       """).show(truncate=False)
+
+
 
 + WHERE:
   + some special cases:
