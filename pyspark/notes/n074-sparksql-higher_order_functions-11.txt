@@ -39,3 +39,52 @@ Spark SQL higher-order functions:
     +------------+------------------+
     
 
+
+(44) discard all elements after one matches from the stop-words
+  Method: using aggregate function, set a flag and skip the elements when it becomes true
+
+    from pyspark.sql import functions as F
+
+    df = spark.createDataFrame([
+      ("Variable speeds allow you to refine every texture with culinary precision",),
+      ("Perfect for family meals and entertaining and kitchen cabinets",),
+      ("The more research you do, the more questions you may have",),
+    ], ['value'])
+
+    stop_words = ["and", "you"]
+
+    df.selectExpr("flatten(sentences(lower(value))) as words") \
+        .withColumn('stop_words', F.array(*map(F.lit, stop_words))) \
+        .selectExpr("words", """
+            aggregate(
+              words, 
+              cast((array(), false) as struct<words:array<string>,flag:boolean>),
+              (acc,x) -> 
+                if(acc.flag, 
+                  acc, 
+                  if(array_contains(stop_words, x),
+                    (acc.words as words, true as flag),
+                    (concat(acc.words, array(x)) as words, false as flag)
+                  )
+                )
+            ).words as cleaned_words
+         """).show(truncate=False)
+    +-------------------------------------------------------------------------------------+-----------------------------+
+    |words                                                                                |cleaned_words                |
+    +-------------------------------------------------------------------------------------+-----------------------------+
+    |[variable, speeds, allow, you, to, refine, every, texture, with, culinary, precision]|[variable, speeds, allow]    |
+    |[perfect, for, family, meals, and, entertaining, and, kitchen, cabinets]             |[perfect, for, family, meals]|
+    |[the, more, research, you, do, the, more, questions, you, may, have]                 |[the, more, research]        |
+    +-------------------------------------------------------------------------------------+-----------------------------+
+
+  Note:
+   (1) array() is an EMPTY array, so there is no need to remove the first element on the finish argument (skipped it)
+   (2) Another way using regexp_replace:
+
+       # stop words by default split by white-spaces, escape metacharacters
+       ptn = '(^|\s+)(?:{})(\s+|$).*'.format('|'.join(stop_words))
+
+       df.withColumn('value', F.regexp_replace(F.lower(F.col('value')), ptn, '')) \
+           .selectExpr('flatten(sentences(value)) as words') \
+           .show(truncate=False)
+
