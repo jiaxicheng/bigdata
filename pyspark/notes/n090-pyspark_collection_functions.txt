@@ -19,9 +19,7 @@ Initialization:
   + struct(*cols): from v1.4
     + SQL: struct(col1, col2,...)
            named_struct(name1, val1, name2, val2,...)
-
-
-
+           (f1, f2)    <-- number of fields must be more than 1
 
   Some Examples: 
     + named_struct:  (c1,c2)  <-- default field names are col1, col2 etc
@@ -29,10 +27,20 @@ Initialization:
         named_struct('f1', col1)
         named_struct('f1', col1, 'f2', col2)
         ('f1', col2)   --> struct<col1:string,col2:double>
-        (col1)         --> same as col1 returning `double`
+        (col2)         --> same as col2 returning `double`
         (col1 as f1)   --> not working with spark 3.0+
         (col1 as f1, col2 as f2)  <-- fine with 1+ fields `struct<f1:double,f2:double>`
-        (f1, f2)    <-- named_struct with defult names struct<col1:string,col2:string>
+        (f1*f2, f2)    <-- named_struct with defult names struct<col1:string,f2:string>
+      
+      Notes:
+       (1) when using `(...)` to create struct, fields from calculated columns will by default have named `colN`
+          otherwise it will be the same as colName as colName, that's why when using struct fields, it can not stand
+          on its own due to the dot in name, see below:
+           
+            (f1*f2, f2)              -->   (f1*f2 as col1, f2 as f2)
+            (f1.s1, f2.s2)           -->   failed, use (f1.s1 as col1, f2.s2 as col2) instead
+            (col1*col2 as c1, col2)  -->  find with mixed 
+        
 
     + struct:
 
@@ -96,6 +104,7 @@ ArrayType: The index for all array functions are 1-based, Column.getItem() metho
       array_min:
     + arrays_zip(*cols): 
       + functionality for two cols can be replaced by zip_with for more flexibilities
+        `zip_with` is similar to zip_longest, NULL will be filled for the element from short list
     + flatten(arr):
       * flatten only 1-level(no recursive), array of arrays into an array
     + shuffle(col): 
@@ -136,10 +145,10 @@ ArrayType: The index for all array functions are 1-based, Column.getItem() metho
     + aggregate: from v2.4
 
         aggregate(
-          arr,                      /* array expr */
-          start,                    /* zero value */ 
-          (acc, y) -> func(acc, y), /* merge      */ 
-          acc -> func(acc)          /* finish     */
+          arr,                      /* expr: an array to iterate */
+          start,                    /* start: zero value */ 
+          (acc, y) -> func(acc, y), /* merge: logic to do reduce */ 
+          acc -> func(acc)          /* finish: post-processing */
         )
 
     + exists: from v2.4
