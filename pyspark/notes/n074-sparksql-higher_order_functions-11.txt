@@ -82,7 +82,7 @@ Spark SQL higher-order functions:
    (2) Another way using regexp_replace:
 
        # stop words by default split by white-spaces, escape metacharacters
-       ptn = r'(^|\s+)(?:{})(\s+|$).*'.format('|'.join(stop_words))
+       ptn = '(^|\s+)(?:{})(\s+|$).*'.format('|'.join(stop_words))
 
        df.withColumn('value', F.regexp_replace(F.lower(F.col('value')), ptn, '')) \
            .selectExpr('flatten(sentences(value)) as words') \
@@ -91,8 +91,7 @@ Spark SQL higher-order functions:
     or use a more reliable pattern which escape all metacharacters:
 
         meta_chars = re.compile(r'([]$^+.*\(\)/{}\|?=><[])')
-        ptn = r'(^|\s+)(?:{})(\s+|$).*'.format('|'.join(meta_chars.sub(r'\\\1', x) for x in stop_words))
-
+        ptn = '(^|\s+)(?:{})(\s+|$).*'.format('|'.join(meta_chars.sub(r'\\\1', x) for x in stop_words))
 
 
 (45) use aggregate function to calculate running sum of an ArrayType column
@@ -118,3 +117,96 @@ Spark SQL higher-order functions:
     |ttttesst       |[tttt, e, ss, t]         |[4, 1, 2, 1]   |[4, 5, 7, 8]      |
     +---------------+-------------------------+---------------+------------------+
 
+
+
+(46) roll-up sum for an array field inside an StructType column
+  REF: https://stackoverflow.com/q/65907795/9510729
+  Method: use aggregate and notice how to access an array field from 
+          an array of structs by `flatten(_main_object.parent_array.child_array)`
+  Code:
+
+    records = '[{"_main_object":{"parent_array":[{"child_array":[{"amount_set":{"presentment_money":{"amount":"2.73","currency_code":"USD"},"shop_money":{"amount":"2.73","currency_code":"USD"}}}],"rollup_total_shop_money_amount":"","rollup_total_presentment_money_amount":""},{"child_array":[{"amount_set":{"presentment_money":{"amount":"2.27","currency_code":"USD"},"shop_money":{"amount":"2.27","currency_code":"USD"}}}],"rollup_total_shop_money_amount":"","rollup_total_presentment_money_amount":""},{"child_array":[],"rollup_total_shop_money_amount":"","rollup_total_presentment_money_amount":""},{"child_array":[],"rollup_total_shop_money_amount":"","rollup_total_presentment_money_amount":""}]}},{"_main_object":{"parent_array":[{"child_array":[],"rollup_total_shop_money_amount":"","rollup_total_presentment_money_amount":""},{"child_array":[{"amount_set":{"presentment_money":{"amount":"2.20","currency_code":"USD"},"shop_money":{"amount":"2.20","currency_code":"USD"}}}],"rollup_total_shop_money_amount":"","rollup_total_presentment_money_amount":""},{"child_array":[],"rollup_total_shop_money_amount":"","rollup_total_presentment_money_amount":""},{"child_array":[{"amount_set":{"presentment_money":{"amount":"2.80","currency_code":"USD"},"shop_money":{"amount":"2.80","currency_code":"USD"}}}],"rollup_total_shop_money_amount":"","rollup_total_presentment_money_amount":""}]}}]'
+
+    df = spark.read.json(sc.parallelize([records]))
+    df.printSchema()
+    root
+     |-- _main_object: struct (nullable = true)
+     |    |-- parent_array: array (nullable = true)
+     |    |    |-- element: struct (containsNull = true)
+     |    |    |    |-- child_array: array (nullable = true)
+     |    |    |    |    |-- element: struct (containsNull = true)
+     |    |    |    |    |    |-- amount_set: struct (nullable = true)
+     |    |    |    |    |    |    |-- presentment_money: struct (nullable = true)
+     |    |    |    |    |    |    |    |-- amount: string (nullable = true)
+     |    |    |    |    |    |    |    |-- currency_code: string (nullable = true)
+     |    |    |    |    |    |    |-- shop_money: struct (nullable = true)
+     |    |    |    |    |    |    |    |-- amount: string (nullable = true)
+     |    |    |    |    |    |    |    |-- currency_code: string (nullable = true)
+     |    |-- rollup_total_presentment_money_amount: string (nullable = true)
+     |    |-- rollup_total_shop_money_amount: string (nullable = true)
+
+    df1 = df.selectExpr("""
+  
+       struct(
+         transform(
+           _main_object.parent_array, x -> 
+             (
+               x.child_array as child_array,
+               aggregate(
+                 x.child_array, 
+                 0D, 
+                 (acc,x) -> acc+float(x.amount_set.presentment_money.amount),
+                 acc -> round(acc,2)
+               ) as sub_total_presentment_amt,
+               aggregate(
+                 x.child_array, 
+                 0D, 
+                 (acc,x) -> acc+float(x.amount_set.shop_money.amount),
+                 acc -> round(acc,2)
+               ) as sub_total_shop_amt
+             )
+         ) as _main_object,
+         aggregate(
+           /* accessing array field inside an array of structs */
+           flatten(_main_object.parent_array.child_array), 
+           0D, 
+           (acc,x) -> acc+float(x.amount_set.presentment_money.amount),
+           acc -> round(acc,2)
+         ) as rollup_total_presentment_money_amount,
+         aggregate(
+           flatten(_main_object.parent_array.child_array), 
+           0D, 
+           (acc,x) -> acc+float(x.amount_set.presentment_money.amount),
+           acc -> round(acc,2)
+
+         ) as rollup_total_shop_money_amount
+       ) as new_main_object
+
+    """)
+    df1.printSchema()
+    root
+     |-- new_main_object: struct (nullable = false)
+     |    |-- _main_object: array (nullable = true)
+     |    |    |-- element: struct (containsNull = false)
+     |    |    |    |-- child_array: array (nullable = true)
+     |    |    |    |    |-- element: struct (containsNull = true)
+     |    |    |    |    |    |-- amount_set: struct (nullable = true)
+     |    |    |    |    |    |    |-- presentment_money: struct (nullable = true)
+     |    |    |    |    |    |    |    |-- amount: string (nullable = true)
+     |    |    |    |    |    |    |    |-- currency_code: string (nullable = true)
+     |    |    |    |    |    |    |-- shop_money: struct (nullable = true)
+     |    |    |    |    |    |    |    |-- amount: string (nullable = true)
+     |    |    |    |    |    |    |    |-- currency_code: string (nullable = true)
+     |    |    |    |-- sub_total_presentment_amt: double (nullable = true)
+     |    |    |    |-- sub_total_shop_amt: double (nullable = true)
+     |    |-- rollup_total_presentment_money_amount: double (nullable = true)
+     |    |-- rollup_total_shop_money_amount: double (nullable = true)
+
+    df1.show(truncate=False, vertical=True)
+    -RECORD 0---------------------------------------------------------------------------------------------------------------------------------------------------
+     new_main_object | [[[[[[[2.73, USD], [2.73, USD]]]], 2.73, 2.73], [[[[[2.27, USD], [2.27, USD]]]], 2.27, 2.27], [[], 0.0, 0.0], [[], 0.0, 0.0]], 5.0, 5.0] 
+     -RECORD 1---------------------------------------------------------------------------------------------------------------------------------------------------
+      new_main_object | [[[[], 0.0, 0.0], [[[[[2.20, USD], [2.20, USD]]]], 2.2, 2.2], [[], 0.0, 0.0], [[[[[2.80, USD], [2.80, USD]]]], 2.8, 2.8]], 5.0, 5.0]
+
+
+ 
