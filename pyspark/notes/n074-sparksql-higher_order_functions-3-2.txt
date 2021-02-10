@@ -291,3 +291,89 @@ Example-11-9: set up min_time in a fixed window, need iterate through the list
     
 
 
+Example-11-10: setting up sessionID on streaming data based on conditions
+  REF: https://stackoverflow.com/q/56290937/9510729
+  Task: create sessionID based on some conditions related to surrounding timestamp:
+   (1) Session expires after 30 minutes of inactivity (Means no click stream data within 30 minutes)
+   (2) Session remains active for a total duration of 2 hours. After 2 hours, renew the session.
+  A typical case using aggregate function:
+  Example and Code:
+
+    from pyspark.sql import functions as F
+
+    df = spark.createDataFrame([
+        ('U1', '2019-01-01T11:00:00Z'), ('U1', '2019-01-01T11:15:00Z'), ('U1', '2019-01-01T12:00:00Z'),
+        ('U1', '2019-01-01T12:20:00Z'), ('U1', '2019-01-01T15:00:00Z'), ('U2', '2019-01-01T11:00:00Z'),
+        ('U2', '2019-01-02T11:00:00Z'), ('U2', '2019-01-02T11:25:00Z'), ('U2', '2019-01-02T11:50:00Z'),
+        ('U2', '2019-01-02T12:15:00Z'), ('U2', '2019-01-02T12:40:00Z'), ('U2', '2019-01-02T13:05:00Z'),
+        ('U2', '2019-01-02T13:20:00Z')
+    ], ['UserId', 'Click Time'])
+
+    df = df.withColumn('Click Time', F.to_timestamp())
+
+    df1 = df.groupby('UserId').agg(F.sort_array(F.collect_list('Click Time')).alias('dta'))
+
+    df_new = df1.selectExpr("UserId", """
+        inline_outer(
+           aggregate(
+              /* expr */
+              slice(dta,2,size(dta)),
+              /* start: set up zero_value, always use cast to avoid data-type mismatch issues */
+              cast(array((dta[0], 1, dta[0])) as array<struct<`Click Time`:timestamp,sid:bigint,start:timestamp>>),
+              /* merge */
+              (acc,x)-> concat(acc, array(struct(
+                 x as `Click Time`,
+                 element_at(acc,-1).sid + int(x > least(element_at(acc,-1)['Click Time'] + interval 30 minutes
+                    , element_at(acc,-1)['start'] + interval 2 hours)) as sid,
+                 IF(x > least(element_at(acc,-1)['Click Time'] + interval 30 minutes
+                    , element_at(acc,-1)['start'] + interval 2 hours), x, element_at(acc,-1).start) as start
+                ))),
+              /* finish */
+              acc -> transform(acc, x -> (x['Click Time'] as `Click Time`, 'Session-'||x.sid as SessionID))
+           )
+        )
+    """)
+    df_new.show()
+    +------+-------------------+---------+                                          
+    |UserId|         Click Time|SessionID|
+    +------+-------------------+---------+
+    |    U2|2019-01-01 11:00:00|Session-1|
+    |    U2|2019-01-02 11:00:00|Session-2|
+    |    U2|2019-01-02 11:25:00|Session-2|
+    |    U2|2019-01-02 11:50:00|Session-2|
+    |    U2|2019-01-02 12:15:00|Session-2|
+    |    U2|2019-01-02 12:40:00|Session-2|
+    |    U2|2019-01-02 13:05:00|Session-3|
+    |    U2|2019-01-02 13:20:00|Session-3|
+    |    U1|2019-01-01 11:00:00|Session-1|
+    |    U1|2019-01-01 11:15:00|Session-1|
+    |    U1|2019-01-01 12:00:00|Session-2|
+    |    U1|2019-01-01 12:20:00|Session-2|
+    |    U1|2019-01-01 15:00:00|Session-3|
+    +------+-------------------+---------+
+
+Another way to setup accumulator as StructType and set `start` as a StructField:
+
+    df_new = df1.selectExpr("UserId", """
+       inline_outer(
+          aggregate(
+             slice(dta,2,size(dta)),
+             /* always use cast to avoid data-type mismatch issues */
+             cast((array((dta[0], 1)), dta[0]) as 
+                 struct<dta:array<struct<`Click Time`:timestamp,sid:bigint>>,start:timestamp>),
+             (acc,x)-> struct(
+                concat(acc.dta, array(struct(
+                   x as `Click Time`,
+                   element_at(acc.dta,-1).sid + int(x > least(element_at(acc.dta,-1)['Click Time'] + interval 30 minutes
+                     , acc.start + interval 2 hours)) as sid
+                  ))) as dta,
+                IF(x > least(element_at(acc.dta,-1)['Click Time'] + interval 30 minutes, acc['start'] + interval 2 hours)
+                   , x, acc.start) as start
+             ),
+             acc -> transform(acc.dta, x -> (x['Click Time'] as `Click Time`, 'Session-'||x.sid as SessionID))
+          )
+       )
+    """)
+  Notice: using `cast` on setting up zero_value(the 2nd argument of aggregate function) is more reliable.
+
+
