@@ -377,3 +377,42 @@ Another way to setup accumulator as StructType and set `start` as a StructField:
   Notice: using `cast` on setting up zero_value(the 2nd argument of aggregate function) is more reliable.
 
 
+Example-11-11: island-gap issue using aggregate function.
+  REF: https://stackoverflow.com/questions/64810042/pyspark-create-range-adjusting-end-date-dates-based-on-date-column
+  Task: break a timeseries into chucks with max range <= 7 days in each chuck. gaps exist between chucks, a typical
+        question using aggregate function:
+  Code:
+
+    test_df = spark.createDataFrame([
+      (1, '2019-01-01'), (1, '2019-01-02'), (1, '2019-01-03'),
+      (1, '2019-01-10'), (1, '2019-01-16'), (1, '2019-01-29') 
+    ], ['id','dtstart'])
+
+    new_df = test_df.groupby("id") \
+        .agg(F.sort_array(F.collect_list("dtstart")).alias("dta")) \
+        .selectExpr(
+          "id", 
+          """
+            inline(
+              aggregate(
+                slice(dta,2,size(dta)),
+                cast(array((dta[0], dta[0], 1)) as array<struct<dtstart:string,wdend:string,count:int>>),
+                (acc,x)-> 
+                  IF(datediff(x,element_at(acc,-1).dtstart) <= 7, 
+                    concat(
+                      slice(acc,1,size(acc)-1), 
+                      array((element_at(acc,-1).dtstart as dtstart, x as wdend, element_at(acc,-1).count+1 as count))), 
+                    concat(acc, array((x as dtstart, x as wdend, 1 as count)))
+                  )
+              )
+            )
+          """).show()
+    +---+----------+----------+-----+                                               
+    | id|   dtstart|     wdend|count|
+    +---+----------+----------+-----+
+    |  1|2019-01-01|2019-01-03|    3|
+    |  1|2019-01-10|2019-01-16|    2|
+    |  1|2019-01-29|2019-01-29|    1|
+    +---+----------+----------+-----+
+
+
