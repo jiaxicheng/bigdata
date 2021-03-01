@@ -416,3 +416,47 @@ Example-11-11: island-gap issue using aggregate function.
     +---+----------+----------+-----+
 
 
+
+Example-11-12: set expr=dta and then discard in finish: acc -> slice(acc,2,size(acc))
+  REF: https://stackoverflow.com/q/64879930/9510729
+  Task: accumulate the value of to_count and reset when the cumsum is zero so that `cumsum >= 0` stands for all rows
+  Code:
+
+    df = spark.createDataFrame([(e,) for e in ['-1', '+1', '-1', '-1', '+1', '+1', '-1', '+1']],['to_count'])
+
+    df = df.withColumn('id', F.monotonically_increasing_id())
+
+    df1 = df.groupby().agg(F.sort_array(F.collect_list(F.struct('id','to_count'))).alias('dta'))
+
+    df_new = df1.selectExpr("""
+      inline(
+        aggregate(
+          /* expr: setup array dta.to_count */
+          dta.to_count, 
+          /* start: setup zero value to array of structs with two fields: count + sum */
+          cast(array(('0',0)) as array<struct<to_count:string,sum:int>>),
+          /* merge: append x to acc with logic to sum satisfies: greatest(element_at(acc,-1).sum+int(x),0) */
+          (acc, x) -> concat(acc, array(named_struct(
+              'to_count', x,
+              'sum', greatest(element_at(acc,-1).sum+int(x),0) 
+            ))), 
+          /* finish: discard the first element of acc */
+          acc -> slice(acc,2,size(acc))
+        )
+      )
+    """)
+    +--------+---+
+    |to_count|sum|
+    +--------+---+
+    |      -1|  0|
+    |      +1|  1|
+    |      -1|  0|
+    |      -1|  0|
+    |      +1|  1|
+    |      +1|  2|
+    |      -1|  1|
+    |      +1|  2|
+    +--------+---+
+
+
+
