@@ -74,8 +74,9 @@ df.show()
         GROUP BY c1, c2 GROUPING SETS ((a,b), (a), (b), ())
 
 
-+ df.groupby().pivot()
++ df.groupby().pivot(col, values=None) 
   Task: used after groupby(), from long to wide (denormalize)
+  Notes: pivot() only take one `column` to do pivoting, explicitly specify values as a list can boost performance.
 
     df.groupby(F.lit('t')).pivot('id').sum('score').drop('t').show()
     +---+---+---+                                                                   
@@ -90,6 +91,8 @@ df.show()
     select label, feature1 from df
     UNION
     select label, feature2 from df
+
+  + use array + explode:  explode(array(*cols))
 
   + use Spark SQL stack(N, expr*) function
     the number of columns will be decided by `count(# of expr*)/N`
