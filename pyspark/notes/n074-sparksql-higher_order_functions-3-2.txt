@@ -460,3 +460,37 @@ Example-11-12: set expr=dta and then discard in finish: acc -> slice(acc,2,size(
 
 
 
+Example-11-13: cumulative sum with reset condition
+  REF: https://stackoverflow.com/q/47364686/9510729
+  Task: reset cumsum when the sum > 20
+  Code:
+  
+    df = spark.createDataFrame([
+        ('1', '5'), ('1', '4'), ('1', '3'), ('1', '5'), ('1', '6'), ('1', '4'), 
+        ('1', '7'), ('1', '5'), ('1', '2'), ('1', '3'), ('1', '2'), ('1', '6'), ('1', '9')
+    ], ['Flag', 'value'])
+
+    df = df.withColumn('id', F.monotonically_increasing_id())
+
+    df1 = df.groupby('Flag').agg(F.sort_array(F.collect_list(F.struct('id','value'))).alias('dta'))
+
+    df_new = df1.selectExpr("Flag", """
+      inline(
+        aggregate(
+          /* expr: */
+          dta.value,
+          /* start: zero value */
+          cast(array(('0',0)) as array<struct<value:string,cumsum:int>>), 
+          /* merge: */
+          (acc, x) -> concat(acc, array(named_struct(
+              'value', x,
+              'cumsum', if(element_at(acc,-1).cumsum>20, int(x), element_at(acc,-1).cumsum+int(x)) 
+            ))), 
+          /* finish: discard the first element of acc */
+          acc -> slice(acc,2,size(acc))
+        )
+    )""")
+
+
+      
+
