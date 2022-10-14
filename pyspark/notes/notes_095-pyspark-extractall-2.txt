@@ -1,0 +1,48 @@
+Use SparkSQL regexp_extract_all() function (since Spark 3.1.0)
+
+    regexp_extract_all(col, regexp[, idx])
+
+where regexp is Java-based regexp, idx is the group-id identified by parenthesis `(..)`, at
+least one group is required to make this function work. 
+---
+
+Example-1: find all `technos` keywords from the texts of descriptions column
+  REF: https://stackoverflow.com/questions/74071267/pyspark-check-if-column-of-strings-contain-words-in-a-list-of
+
+    from pyspark.sql import functions as F
+    import re
+
+    df = spark.createDataFrame([
+      (1,"Mastering Python and C++"),
+      (2,"Being SQL Master and knowing basics of R"), 
+      (3,"Working daily with JavaScript and NodejS")
+    ], ["id", "description"])
+
+    # keywords of concerned
+    technos = ["SQL", "NodeJS", "C", "R", "C++", "Python", "Google Cloud"]
+
+    # set up the regexp to match keywords, we first escape all regex meta-characters and then double the backslashes
+    # the later is important when using backslashes in strings of F.expr() function
+    technos_re = (r'(?i)\\b(' 
+        + '|'.join(re.escape(x).replace('\\','\\\\') for x in technos) 
+        + r')(?:\\s|$)')
+
+
+    # use SparkSQL regexp_extract_all() function to retrieve all matches. raw string is forced in the expression
+    df.withColumn("technos_found", F.expr(rf"regexp_extract_all(description, '{technos_re}')")).show(3,0)
+    +---+----------------------------------------+-------------+
+    |id |description                             |technos_found|
+    +---+----------------------------------------+-------------+
+    |1  |Mastering Python and C++                |[Python, C++]|
+    |2  |Being SQL Master and knowing basics of R|[SQL, R]     |
+    |3  |Working daily with JavaScript and NodejS|[NodejS]     |
+    +---+----------------------------------------+-------------+
+
+Notes:
+  (1) this only works when the searched keywords do not overlap. for example, you dont have "Google" and 
+      "Google Cloud" in `technos` and want to match both. regexp_extract_all() will scan the text in one
+      go and matches only one.
+  (2) use raw string and backslasked with SparkSQL expression.
+  (3) using `(?:\s|$)` instead of `\b` as the right bounday since `\b` does not work when `C++` is at the end of the string.
+
+
