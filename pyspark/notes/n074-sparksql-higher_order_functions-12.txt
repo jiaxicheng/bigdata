@@ -1,0 +1,81 @@
+Continue..
+
+Spark SQL higher-order functions:
+
+---
+(47) using map_zip_with() function to merge Maps using aggregate function
+    Target: retrieve all numbers following by a letter 'A' and then group them by the first number into arrays
+            join the arrays items by , and between arrays by '/'. enclose the resulting string with parenthesis.
+    Notes:
+      (1) when using map_zip_with to merge Maps, make sure the values are non-NULL by using
+          function like `coalesce`, `ifnull`, so keys from both maps are not discarded
+    REF:https://stackoverflow.com/questions/74168303/extract-specific-string-from-a-column-and-place-them-in-a-sequence
+
+    df = spark.createDataFrame([
+        {'id': 1, 'id1': '859A;'}, 
+        {'id': 2, 'id1': '209A/229A/509A;'},
+        {'id': 3, 'id1': '(105A/111A/121A/131A/201A/205A/211A/221A/231A/509A/801A/805A/811A/821A)+TZ+-494;'},
+        {'id': 4, 'id1': '111A/114A/121A/131A/201A/211A/221A/231A/651A+-(Y05/U17)/801A/804A/821A;'},
+        {'id': 5, 'id1': '(651A/851A)+U17/861A;'}
+    ])
+
+    # create the array of all matched with `[0-9]+A` pattern
+    df1 = df.withColumn('col1', F.regexp_extract_all('id1', F.lit('([0-9]+A)'),1))
+
+    # using map<string,array<string>> as accumulator and the function map_zip_with to merge maps
+
+    # using Spark SQL
+    df1.selectExpr("""
+
+        aggregate(
+             /* convert array items from `string` into `<map<string,array<string>>` */
+             transform(col1, x -> map(left(x,1), array(x)))
+             /* set the zero value for the accumulator to be an empty Map typed `<map<string,array<string>>` */
+           , cast(map() as map<string,array<string>>)
+             /* 
+               merge: using map_zip_with to combine two Maps: acc and `y`, using concat to merge their correponding
+                values by the same key. make sure neither value is NULL, if so, must be converted into
+                empty array by coalesce(v, array()) 
+             */
+           , (acc, y) -> map_zip_with(acc, y, (k,v1,v2) -> concat(coalesce(v1,array()),coalesce(v2,array())))
+             /*
+               finish: create the resulting string by using array_join to concatenate map_values and 
+                       the array items, using `||` to concatenate parenthesis
+             */
+           , acc -> '(' || array_join(map_values(transform_values(acc, (k,v) -> array_join(v,','))),'/') || ')'
+        ) as new_col
+
+    """).show(6,0)
+    +-----------------------------------------------------------------------+       
+    |new_col                                                                |
+    +-----------------------------------------------------------------------+
+    |(859A)                                                                 |
+    |(209A,229A/509A)                                                       |
+    |(105A,111A,121A,131A/201A,205A,211A,221A,231A/509A/801A,805A,811A,821A)|
+    |(111A,114A,121A,131A/201A,211A,221A,231A/651A/801A,804A,821A)          |
+    |(651A/851A,861A)                                                       |
+    +-----------------------------------------------------------------------+
+
+    #The same method as the above but using pyspark API
+    df1.select(
+        F.aggregate(
+            F.transform("col1", lambda x: F.create_map(F.left(x,F.lit(1)), F.array(x)))
+          , F.create_map().astype("map<string,array<string>>")
+          , lambda acc,y: F.map_zip_with(acc,y,lambda k,v1,v2: F.concat(F.coalesce(v1,F.array()),F.coalesce(v2,F.array())))
+          , lambda acc: F.concat(
+                F.lit("(")
+              , F.array_join(F.map_values(F.transform_values(acc, lambda k,v: F.array_join(v,','))),'/')
+              , F.lit(")")
+            )
+        ).alias("new_col")
+    ).show(6,0)
+    +-----------------------------------------------------------------------+
+    |new_col                                                                |
+    +-----------------------------------------------------------------------+
+    |(859A)                                                                 |
+    |(209A,229A/509A)                                                       |
+    |(105A,111A,121A,131A/201A,205A,211A,221A,231A/509A/801A,805A,811A,821A)|
+    |(111A,114A,121A,131A/201A,211A,221A,231A/651A/801A,804A,821A)          |
+    |(651A/851A,861A)                                                       |
+    +-----------------------------------------------------------------------+
+
