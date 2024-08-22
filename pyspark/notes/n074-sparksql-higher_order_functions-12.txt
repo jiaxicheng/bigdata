@@ -94,35 +94,38 @@ Spark SQL higher-order functions:
          (1-based indices), set start=floor(size(score)/2) and length=2-size(score)%2 which
          is `1` or `2` based on the value of `size(score)%2`. the average of this slice will be the median
 
+    from pyspark.sql import functions as F
+
     df = spark.createDataFrame([
          ([83.52, 81.79, 84.0, 75.0], ["P", "N", "N", "P", "P","T","N","T"])
        , ([86.13, 85.48, 88.15], ["N", "N", "N", "P"])
     ], ['score','review'])
 
-    df.selectExpr("*", """
-
+    # function to calculate Mode using SparkSQL
+    calc_mode = lambda col: F.expr(f"""
         aggregate(
-            review 
+            `{col}`
           , cast(map() as map<string,int>)
             /* use map_zip_with to find all unique items and its #of entries in `review` array */
           , (acc,y)-> map_zip_with(acc,map(y,1),(k,v1,v2) -> coalesce(v1,0)+coalesce(v2,0))
             /* get all keys with value = array_max */
           , acc -> map_keys(map_filter(acc, (k,v) -> v = array_max(map_values(acc))))
-        ) as reviewMode
-    
-    ""","""
+        ) 
+    """)
 
-        /* take a slice of array_sort(score), start=floor(size(score)/2) and length=2-size(score)%2
-         * use the aggregate function to calculate the mean of this array slice
-         */
+    # function to calculate Median using SparkSQL
+    # take a slice of array_sort(score), start=floor(size(score)/2) and length=2-size(score)%2
+    # use the aggregate function to calculate the mean of this array slice
+    calc_median = lambda col: F.expr(f"""
         aggregate(
-             slice(array_sort(score), floor(size(score)/2), 2-size(score)%2)
+             slice(array_sort(`{col}`), floor(size(`{col}`)/2), 2-size(`{col}`)%2)
            , (0D as total, 0 as cnt)
            , (acc,x) -> (acc.total+x, acc.cnt+1)
            , acc -> round(acc.total/acc.cnt,2)
-        ) as scoreMedian
-    
-    """).show(3,0)
+        ) 
+    """)
+
+    df.withColumn('reviewMode', calc_mode('review')).withColumn('scoreMedian', calc_median('score')).show(3,0)
     +--------------------------+------------------------+----------+-----------+
     |score                     |review                  |reviewMode|scoreMedian|
     +--------------------------+------------------------+----------+-----------+
