@@ -9,6 +9,8 @@ Spark SQL higher-order functions:
     Notes:
       (1) when using map_zip_with to merge Maps, make sure the values are non-NULL by using
           function like `coalesce`, `ifnull`, so keys from both maps are not discarded
+      (2) Be careful using map_concat() function to merge two Maps which yields [DUPLICATED_MAP_KEY] error,
+          this can be used with map_contains_key() function though.
     REF:https://stackoverflow.com/questions/74168303/extract-specific-string-from-a-column-and-place-them-in-a-sequence
 
     df = spark.createDataFrame([
@@ -78,4 +80,53 @@ Spark SQL higher-order functions:
     |(111A,114A,121A,131A/201A,211A,221A,231A/651A/801A,804A,821A)          |
     |(651A/851A,861A)                                                       |
     +-----------------------------------------------------------------------+
+
+
+(48) use map_with_zip w/ aggregate function to calculate the Mode and Median values of an array column
+   REF: https://stackoverflow.com/questions/78079244
+   Target: find the mode and median of an array
+   Notes:
+     (1) map_zip_with, map_filter functions require Spark 3.0.0+. 
+     (2) For Mode, map_zip_with/aggregate function are used to calculate the frequency of item values,
+         then use map_filter to find all keys with the max_value which returns an array (multiple items
+         might be shown in the result of Mode)
+     (3) To find Median, it's important to find items required for the calculation. Using slice() function 
+         (1-based indices), set start=floor(size(score)/2) and length=2-size(score)%2 which
+         is `1` or `2` based on the value of `size(score)%2`. the average of this slice will be the median
+
+    df = spark.createDataFrame([
+         ([83.52, 81.79, 84.0, 75.0], ["P", "N", "N", "P", "P","T","N","T"])
+       , ([86.13, 85.48, 88.15], ["N", "N", "N", "P"])
+    ], ['score','review'])
+
+    df.selectExpr("*", """
+
+        aggregate(
+            review 
+          , cast(map() as map<string,int>)
+            /* use map_zip_with to find all unique items and its #of entries in `review` array */
+          , (acc,y)-> map_zip_with(acc,map(y,1),(k,v1,v2) -> coalesce(v1,0)+coalesce(v2,0))
+            /* get all keys with value = array_max */
+          , acc -> map_keys(map_filter(acc, (k,v) -> v = array_max(map_values(acc))))
+        ) as reviewMode
+    
+    ""","""
+
+        /* take a slice of array_sort(score), start=floor(size(score)/2) and length=2-size(score)%2
+         * use the aggregate function to calculate the mean of this array slice
+         */
+        aggregate(
+             slice(array_sort(score), floor(size(score)/2), 2-size(score)%2)
+           , (0D as total, 0 as cnt)
+           , (acc,x) -> (acc.total+x, acc.cnt+1)
+           , acc -> round(acc.total/acc.cnt,2)
+        ) as scoreMedian
+    
+    """).show(3,0)
+    +--------------------------+------------------------+----------+-----------+
+    |score                     |review                  |reviewMode|scoreMedian|
+    +--------------------------+------------------------+----------+-----------+
+    |[83.52, 81.79, 84.0, 75.0]|[P, N, N, P, P, T, N, T]|[P, N]    |82.66      |
+    |[86.13, 85.48, 88.15]     |[N, N, N, P]            |[N]       |85.48      |
+    +--------------------------+------------------------+----------+-----------+
 
