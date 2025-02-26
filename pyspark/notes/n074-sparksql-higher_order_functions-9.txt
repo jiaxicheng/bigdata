@@ -130,7 +130,7 @@ Spark SQL higher-order functions:
 
 
 
-(32) Use aggregate function to do stateful aggregation, no need to pre-sort data by using a MapType column.
+(32) Use aggregate function to do stateful accumulation, no need to pre-sort data by using a MapType column.
   REF: https://stackoverflow.com/questions/61965306/how-can-i-calculate-a-moving-average-with-certain-days-missing
 
   Target: calculate a moving average: today's score + (yesterdya's score * .50) 
@@ -153,34 +153,32 @@ Spark SQL higher-order functions:
     +---+----+-----+
   
     # below create a MapType column: `data` with key=`day` and value=`score`
-    df2 = df.groupby('user').agg(expr("map_from_entries(collect_list(struct(day,score))) as data"))
+    df2 = df.groupby('user').agg(
+        expr("map_from_entries(collect_list(struct(day,score))) as data"),
+        fmin('day').alias('first_day'),
+        fmax('day').alias('last_day')
+    )
   
     df2.selectExpr("user", """ 
-       
-        inline( 
-          aggregate( 
-            /* iterate through 1 -> 6 */
-            sequence(0,6), 
-            /* zero_value as an array of structs: array<struct<day:int,score:double>> */
-            array((int(NULL) as day, double(NULL) as score)), 
-            /* reduce, iterate by `i` */
-            (acc, i) -> 
-              CASE
-                /* first element, setup acc based on i and data[i] */
-                WHEN (element_at(acc,-1).day is NULL THEN array((i as day, ifnull(data[i],0) as score)) 
-                /* else, append an new element using day=i and score calculated by 
-                 * the previous score: element_at(acc,-1).score 
-                 * and the current score: ifnull(data[i],0)
-                 */
-                ELSE concat(acc, array((i as day, 0.5*element_at(acc,-1).score + ifnull(data[i],0) as score)))
-              END
-            /* remove array items with score < 0.1 */
-            acc -> filter(acc, x -> x.score >= 0.1) 
-          ) 
+        inline_outer( 
+            aggregate( 
+                /* for each user, iterate from first_day to the next 7 days or last_day if it's 
+                 * late than 7 days, interval by 1 day */
+                sequence(first_day,greatest(first_day+7,last_day)), 
+                /* zero_value as an array of structs: array<struct<day:int,score:double>> */
+                CAST(array() as array<struct<day:int,score:double>>), 
+                /* merge: iterate by `i` */
+                (acc, i) -> array_append(acc, named_struct(
+                        "day", i,
+                        "score", 0.5*ifnull(element_at(acc,-1).score, 0) + ifnull(data[i], 0)
+                    )
+                ),
+                /* finish: remove array items with score < 0.1 */
+                acc -> filter(acc, x -> x.score >= 0.1) 
+            ) 
         ) 
-  
     """).show(22)
-    +----+---+-------------------+                                                  
+    +----+---+-------------------+
     |user|day|              score|
     +----+---+-------------------+
     |   c|  1|                0.6|
@@ -202,8 +200,6 @@ Spark SQL higher-order functions:
     |   a|  4|            0.19375|
     +----+---+-------------------+
 
-
-  
 
 (33) use sequence + filter to find the index of a specific value in an array of structs
 
