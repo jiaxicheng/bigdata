@@ -327,35 +327,17 @@ Spark SQL higher-order functions:
    (2) using aggregate function to drop duplicates, use array_contains() to check if x.city already exists
        in `acc` array. see below two situations:
 
-
-    from pyspark.sql import Window, functions as func 
+    from pyspark.sql import functions as func 
     
     d = spark.createDataFrame([
-        ('1234', '203957', '2010', 'London', 'CHEM'), ('1234', '203957', '2010', 'London', 'BIOL'), 
-        ('1234', '203957', '2011', 'London', 'PHYS'), ('1234', '203957', '2013', 'London', 'PHYS'), 
-        ('1234', '288400', '2012', 'Berlin', 'MATH'), ('1234', '288400', '2012', 'Berlin', 'CHEM') 
+        ('1234', '203957', 2010, 'London', 'CHEM'), ('1234', '203957', 2010, 'London', 'BIOL'), 
+        ('1234', '203957', 2011, 'London', 'PHYS'), ('1234', '203957', 2013, 'London', 'PHYS'), 
+        ('1234', '288400', 2012, 'Berlin', 'MATH'), ('1234', '288400', 2012, 'Berlin', 'CHEM') 
     ], ['auid', 'eid', 'year', 'city', 'subject'])
     
-    df1 = d.groupBy('auid').agg(func.sort_array(func.collect_set(func.struct('year', 'city'))).alias('city_set'))
-    +----+----------------------------------------------------------------+
-    |auid|city_set                                                        |
-    +----+----------------------------------------------------------------+
-    |1234|[[2010, London], [2011, London], [2012, Berlin], [2013, London]]|
-    +----+----------------------------------------------------------------+
-
   Case-1: only city field is required
 
-    df2 = df1.withColumn("city_set", func.expr(""" 
-        aggregate( 
-          /* expr: take slice of city_set array from the 2nd element to the last */
-          slice(city_set,2,size(city_set)-1), 
-          /* start: initialize `acc` as an array with a single entry city_set[0].city */
-          array(city_set[0].city), 
-          /* merge: iterate through `expr`, if x.city exists in `acc`, keep as-is
-           *        , otherwise add an entry to `acc` using concat function */
-          (acc,x) -> IF(array_contains(acc,x.city), acc, concat(acc, array(x.city))) 
-        )
-    """))
+    df1 = d.groupby('auid').agg(func.collect_set('city').alias('citi_set'))
     +----+----------------+
     |auid|        city_set|
     +----+----------------+
@@ -364,22 +346,28 @@ Spark SQL higher-order functions:
     
   Case-2: the whole struct is required, keep only the first array element upon duplicate city entries
 
-    df3 = df1.withColumn("city_set", func.expr(""" 
-          aggregate( 
-            /* expr: city_set array slice from the 2nd element to the last */
-            slice(city_set,2,size(city_set)-1), 
-            /* start: initialize acc with as an array with a single entry city_set[0] */
-            array(city_set[0]), 
-            /* merge: iterate through expr, and do things based on if x.city exists in acc.city */
-            (acc,x) ->  IF(array_contains(acc.city,x.city), acc, concat(acc, array(x)))
-          )
-    """)).show(truncate=False)
+    df1 = (d.groupby('auid','city')
+        .agg(func.min('year').alias('year'))
+        .groupby('auid')
+        .agg(func.collect_list(func.struct('city','year')).alias('city_set'))
+    )
+    df1.show(1,0)
     +----+--------------------------------+
     |auid|city_set                        |
     +----+--------------------------------+
-    |1234|[[2010, London], [2012, Berlin]]|
+    |1234|[{Berlin, 2012}, {London, 2010}]|
     +----+--------------------------------+
 
+    Use aggregate function [sorting is unnecessary, only for illustration purpose]
+    df2 = (d.groupby('auid')
+        .agg(func.array_sort(func.collect_list(func.struct('city','year'))).alias('city_set'))
+        .withColumn('city_set', func.expr("""
+            aggregate(
+                dta,
+                cast(array() as array<struct<city:string,year:long>>),
+                (acc, x) -> IF(array_contains(acc.city, x.city), acc, array_append(acc,x))
+        """)
+    )
 
 
 (41) use transform + array_except to do combinations of two arrays
