@@ -8,16 +8,14 @@ Spark SQL higher-order functions:
           df2.tokens from the matched df1.terms
   Notes: 
    (1) condition with array_overlaps:
-     item-1. return true if both array contain any non-null elements
-     item-2. retuen NULL if above is not andboth arrays are non-EMPTY and any of them contains a NULL element
-     item-3. return false
+     item-1. return true if both arrays contain at lease one non-null elements
+     item-2. else if both arrays are non-EMPTY and contain at least one NULL element in any of the arrays, return NULL
+     item-3. else return false
    (2) the difference from size + array_intersect which returns false instead of NULL with the above item-2.
    (3) use arrays_overlap when joining by the true condition, use `size(array_intersect(a1,a2))==0` when looking for
        arrays without overlap.
 
-  Method-1: using arrays_overlap on join condition and then do calculations
-
-    from pyspark.sql.functions import expr, desc, row_number, broadcast
+    from pyspark.sql.functions import expr, desc, broadcast
 
     # example dataframes
     df1 = spark.createDataFrame([
@@ -78,61 +76,21 @@ Spark SQL higher-order functions:
 
    Note: if the max_of_weights instead of sum_of_weights is required, change 
          `(acc, y) -> acc + y.termWeights` to `(acc, y) -> greatest(acc, y.termWeights)`
+         or just replace aggregate function with array_max()
+             array_max(filter(arrays_zip(termWeights,terms), x -> array_contains(tokens, x.terms))).termWeights
 
-  **Step-4:** for each r_id, find the rows with highest `matched_total_weights` using Window function and filter
+  **Step-4:** for each r_id, find the rows with highest `matched_total_weights` using groupby with max_by function
+  
+    from pyspark.sql.functions import max_by
 
-    from pyspark.sql import Window
-    w1 = Window.partitionBy('r_id').orderBy(desc('matched_total_weights'))
-    
-    df4.withColumn('rn', row_number().over(w1)).filter('rn=1').drop('rn', 'matched_total_weights').show()
-    +----+---------------------------------------------------------------+-----+    
+    df4.groupby('r_id','tokens').agg(max_by('topic','matched_total_weights').alias('topic')).show(5,0)
+    +----+---------------------------------------------------------------+-----+
     |r_id|tokens                                                         |topic|
     +----+---------------------------------------------------------------+-----+
-    |0   |[the human kcnj9, girk3, member, potassium]                    |null |
     |1   |[background, the treatment, breast, cancer, chemotherapy, diet]|1    |
+    |0   |[the human kcnj9, girk3, member, potassium]                    |null |
     |2   |[objective, pattern, apoptosis]                                |0    |
     +----+---------------------------------------------------------------+-----+
-
-
-  Method-2: iterate through df1 using withColumn and a loop, this does not require join/groupby, good for small df1
-
-    from pyspark.sql.functions import expr, when, coalesce, array_contains, lit, struct
-
-    d = df1.selectExpr("string(topic)", "arrays_zip(termWeights,terms) as terms").rdd.collectAsMap()
-
-    df2 = df2.withColumn('tokens', expr("transform(tokens, x -> lower(x))"))
-
-    cols = df2.columns
-
-    for x,y in d.items(): 
-      df2 = df2.withColumn(x, 
-          struct(
-            sum([when(array_contains('tokens', t.terms), t.termWeights).otherwise(0) for t in y]).alias('sum_of_weights'),
-            lit(x).alias('topic'),
-            coalesce(*[when(array_contains('tokens', t.terms),1) for t in y]).isNotNull().alias('has_match')
-          )
-      )
-    df2.show()
-    +----+--------------------+--------------------+--------------------+---------------+--------------------+
-    |r_id|              tokens|                   0|                   1|              2|                   3|
-    +----+--------------------+--------------------+--------------------+---------------+--------------------+
-    |   0|[the human kcnj9,...|     [0.0, 0, false]|     [0.0, 1, false]|[0.0, 2, false]|     [0.0, 3, false]|
-    |   1|[background, the ...|     [0.0, 0, false]|[0.01345345592992...|[0.0, 2, false]|[0.00884073065788...|
-    |   2|[objective, patte...|[0.01177232276990...|     [0.0, 1, false]|[0.0, 2, false]|[0.00930562605622...|
-    +----+--------------------+--------------------+--------------------+---------------+--------------------+
-
-    df3 = df2.selectExpr(
-        *cols, 
-        f"array_max(filter(array({'`{}`'.format('`,`',join(d.keys()))}), x -> x.has_match)).topic as topic1"
-    )
-    df3.show()
-    +----+--------------------+-----+
-    |r_id|              tokens|topic|
-    +----+--------------------+-----+
-    |   0|[the human kcnj9,...| null|
-    |   1|[background, the ...|    1|
-    |   2|[objective, patte...|    0|
-    +----+--------------------+-----+
 
 
 
