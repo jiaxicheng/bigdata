@@ -22,7 +22,7 @@ Spark SQL higher-order functions:
     ])
 
     # create the array of all matched with `[0-9]+A` pattern
-    df1 = df.withColumn('col1', F.regexp_extract_all('id1', F.lit('([0-9]+A)'),1))
+    df1 = df.withColumn('col1', F.expr("regexp_extract_all(id1, '([0-9]+A)',1)"))
 
     # using map<string,array<string>> as accumulator and the function map_zip_with to merge maps
 
@@ -61,7 +61,7 @@ Spark SQL higher-order functions:
     #The same method as the above but using pyspark API
     df1.select(
         F.aggregate(
-            F.transform("col1", lambda x: F.create_map(F.left(x,F.lit(1)), F.array(x)))
+            F.transform("col1", lambda x: F.create_map(x.substr(1,1), F.array(x)))
           , F.create_map().astype("map<string,array<string>>")
           , lambda acc,y: F.map_zip_with(acc,y,lambda k,v1,v2: F.concat(F.coalesce(v1,F.array()),F.coalesce(v2,F.array())))
           , lambda acc: F.concat(
@@ -104,10 +104,10 @@ Spark SQL higher-order functions:
     # function to calculate Mode using SparkSQL
     calc_mode = lambda col: F.expr(f"""
         aggregate(
-            `{col}`
-          , cast(map() as map<string,int>)
+            `{col}`, 
+            cast(map() as map<string,int>),
             /* use map_zip_with to find all unique items and its #of entries in `review` array */
-          , (acc,y)-> map_zip_with(acc,map(y,1),(k,v1,v2) -> coalesce(v1,0)+coalesce(v2,0))
+            (acc,x)-> map_zip_with(acc, map(x,1), (k,v1,v2) -> coalesce(v1,0)+coalesce(v2,0))
             /* get all keys with value = array_max */
           , acc -> map_keys(map_filter(acc, (k,v) -> v = array_max(map_values(acc))))
         ) 
