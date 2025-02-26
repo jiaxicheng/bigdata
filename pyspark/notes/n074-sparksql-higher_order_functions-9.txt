@@ -41,12 +41,12 @@ Spark SQL higher-order functions:
       """
         /* more efficient version */
         aggregate( 
-          vals, 
-          /* more robust way: cast(array_repeat(array(),size(percentiles)) as array<array<string>>)*/
-          cast(array_repeat(array(),2) as array<array<string>>), 
-          (acc, y) -> 
-            transform(acc, (x,i) -> IF(y.val1 > percentiles[i], concat(x, array(y.val2)), x)),
-          acc -> transform(acc, x -> size(array_distinct(x))) 
+            vals, 
+            /* more robust way: cast(array_repeat(array(),size(percentiles)) as array<array<string>>)*/
+            cast(array_repeat(array(),2) as array<array<string>>), 
+            (acc, y) -> 
+                transform(acc, (x,i) -> IF(y.val1 > percentiles[i], concat(x, array(y.val2)), x)),
+            acc -> transform(acc, x -> size(array_distinct(x))) 
         ) as distinct_count_1 
       """
     ).show(10,0)                                                                                                       
@@ -95,17 +95,16 @@ Spark SQL higher-order functions:
 
     # Spark 2.4+
     df.selectExpr("*", """ 
-      aggregate( 
-        vals,  
-        cast(map() as map<string,int>), 
-        (acc,y) -> 
-          IF(acc[y] is NULL 
-              /* insert a new key */
-            , map_concat(acc, map(y,1))
-              /* update an existing key */
-            , map_from_entries(transform(map_keys(acc), k -> (k as key, acc[k] + int(k=y) as val))) 
-          ) 
-      ) as new_data 
+        aggregate( 
+            vals,  
+            cast(map() as map<string,int>), 
+            (acc,y) -> CASE
+                    /* insert a new key */
+                    WHEN NOT array_contains(map_keys(acc), y) THEN map_concat(acc, map(y,1)) 
+                    /* update an existing key */
+                    ELSE map_from_entries(transform(map_keys(acc), k -> (k as key, acc[k] + IF(k==y,1,0) as val)))
+                END
+        ) AS new_data 
     """).show(1,0)      
     +------------------------------------------+---------------------------------+
     |vals                                      |new_data                         |
@@ -113,19 +112,20 @@ Spark SQL higher-order functions:
     |[val1, val2, val1, val1, val3, val2, val1]|[val1 -> 4, val2 -> 2, val3 -> 1]|
     +------------------------------------------+---------------------------------+
     
-    # Spark 3.0+, using transform_values:
-    df.selectExpr("*", """                                                     
-      aggregate(vals, 
-        cast(map() as map<string,int>),
-        (acc,y) -> IF(acc[y] is NULL, map_concat(acc, map(y,1)), transform_values(acc, (k,v) -> v + int(k=y)))
-      ) as new_data
+    # Spark 3.0+, using aggregate + map_zip_with functions:
+    df.selectExpr("*", """
+        aggregate(
+            vals,
+            cast(map() as map<string,int>),
+            (acc,y) -> map_zip_with(acc, map(y,1), (k,v1,v2) -> coalesce(v1,0) + coalesce(v2,0))
+        ) as new_data
     """).show(1,0)
     +------------------------------------------+---------------------------------+
     |vals                                      |new_data                         |
     +------------------------------------------+---------------------------------+
-    |[val1, val2, val1, val1, val3, val2, val1]|[val1 -> 4, val2 -> 2, val3 -> 1]|
+    |[val1, val2, val1, val1, val3, val2, val1]|{val1 -> 4, val2 -> 2, val3 -> 1}|
     +------------------------------------------+---------------------------------+
-    
+
   Note: a similar example https://stackoverflow.com/questions/62422501/how-to-aggregate-values-within-array-in-pyspark  
 
 
@@ -297,17 +297,22 @@ Spark SQL higher-order functions:
     df.selectExpr(
         "id", 
         """
-          inline_outer(
-            aggregate(
-              /* */
-              sequence(1,3), 
-              /* zero_value: array of structs with first item having time/value on the current row */
-              array((time, value)),
-              /* merge: for sequence 1 to 3, append an array of struct having time 5 second from the 
-                 time of the last item in existing acc array and set the corresponding value to NULL */
-              (acc, x) -> concat(acc, array((element_at(acc,-1).time + interval 5 seconds as time, NULL as value)))
+            inline_outer(
+                aggregate(
+                    /* */
+                    sequence(1,3), 
+                    /* zero_value: array of structs with first item having time/value on the current row */
+                    array((time, value)),
+                    /* merge: for sequence 1 to 3, append an array of struct having time 5 second from the 
+                       time of the last item in existing acc array and set the corresponding value to NULL
+                     */
+                    (acc, x) -> array_append(acc, named_struct(
+                            "time", element_at(acc,-1).time + INTERVAL 5 SECONDS, 
+                            "value", double(NULL)
+                        )
+                    )
+                )
             )
-          )
         """
     ).show(truncate=False)
     +---+-----------------------+-----+
@@ -326,7 +331,6 @@ Spark SQL higher-order functions:
     |id3|2020-02-22 04:57:32.133|null |
     |id3|2020-02-22 04:57:37.133|null |
     +---+-----------------------+-----+
-
 
 
 (35) aggregate set zero_value using the first array item and then iterate from the 2nd to the last:
