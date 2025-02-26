@@ -9,6 +9,8 @@ Spark SQL higher-order functions:
     using the below aggregate function, to overcome this we need to use coalesce while reset size of the
     array elements to exclude null:
 
+    from pyspark.sql import functions as func
+
   Not working:
 
     power_mean = lambda col: func.expr(f"""
@@ -19,14 +21,17 @@ Spark SQL higher-order functions:
     
     power_mean = lambda col: func.expr(f"""
         aggregate(
-          /* expr: array column to iterate through */
-          `{col}`,
-          /* start: set zero value and accumulator as an struct<psum:double,n:int> */
-          (0D as psum, size(filter(`{col}`, x -> x is not null)) as n),
-          /* merge: iterate through expr and calculate `sum([(x)**p for x in values])` */
-          (acc,x) -> (acc.psum+power(coalesce(x,0),2*acc.n) as psum, acc.n as n),
-          /* finish: post processing */
-          acc -> power(acc.psum/acc.n, 0.5/acc.n)
+            /* expr: array column to iterate through */
+            `{col}`,
+            /* start: set zero value and accumulator as an struct<psum:double,n:int> */
+            (0D as psum, size(filter(`{col}`, x -> x is not null)) as n),
+            /* merge: iterate through expr and calculate `sum([(x)**p for x in values])` */
+            (acc,x) -> named_struct(
+                    "psum", acc.psum + power(coalesce(x,0), 2*acc.n), 
+                    "n", acc.n
+                ),
+            /* finish: post processing */
+            acc -> power(acc.psum/acc.n, 0.5/acc.n)
         )
     """)
     
@@ -38,6 +43,18 @@ Spark SQL higher-order functions:
     |[20, 5,, 10]|16.697421658984894|
     +------------+------------------+
     
+  Note: for Spark 3.4.0+, using array_compact() function can remove all nulls from the array which makes things 
+        simpler:
+
+    power_mean = lambda col: func.expr(f"""
+        aggregate(
+            array_compact(`{col}`),
+            (0D as psum, size(`{col}`) as n),
+            (acc,x) -> (acc.psum+power(x,2*acc.n) as psum, acc.n as n),
+            acc -> power(acc.psum/acc.n, 0.5/acc.n)
+         )
+    """)
+
 
 
 (44) discard all elements after one matches from the stop-words
@@ -54,20 +71,17 @@ Spark SQL higher-order functions:
     stop_words = ["and", "you"]
 
     df.selectExpr("flatten(sentences(lower(value))) as words") \
-        .withColumn('stop_words', F.array(*map(F.lit, stop_words))) \
+        .withColumn('stop_words', F.lit(stop_words)) \
         .selectExpr("words", """
             aggregate(
-              words, 
-              cast((array(), false) as struct<words:array<string>,flag:boolean>),
-              (acc,x) -> 
-                if(acc.flag, 
-                  acc, 
-                  if(array_contains(stop_words, x),
-                    (acc.words as words, true as flag),
-                    (concat(acc.words, array(x)) as words, false as flag)
-                  )
-                )
-            ).words as cleaned_words
+                words, 
+                cast((array(), false) as struct<words:array<string>,flag:boolean>),
+                (acc,x) -> CASE WHEN acc.flag THEN acc
+                        WHEN array_contains(stop_words, x) THEN named_struct("words", acc.words, "flag", true)
+                        ELSE named_struct("words", array_append(acc.words, x), "flag", false)
+                    END,
+                acc -> acc.words
+            ) as cleaned_words
          """).show(truncate=False)
     +-------------------------------------------------------------------------------------+-----------------------------+
     |words                                                                                |cleaned_words                |
@@ -97,26 +111,31 @@ Spark SQL higher-order functions:
 (45) use aggregate function to calculate running sum of an ArrayType column
   REF: https://stackoverflow.com/questions/58041497
 
-    from pyspark.sql.functions import array_remove, split, regexp_replace, expr
+    from pyspark.sql.functions import expr
 
     df = spark.createDataFrame([(e,) for e in ["aaabbbb0000ccaa", 'ttttesst']], ['x'])
 
     # iterate the full array, need typecast to zero value of value and also use ifnull() on calculation
-    expe1 = "aggregate(l1, cast(array() as array<int>), (acc,x) -> concat(acc, array(x+ifnull(element_at(acc,-1),0))))"
-    # iterate from the 2nd element of the Array, no need typecast and ifnull()
-    expr2 = "aggregate(slice(l1,2,size(l1)), array(l1[0]), (acc,x) -> concat(acc, array(x+element_at(acc,-1))))"
+    running_sum = lambda col: expr(f"""
+        aggregate(
+            `{col}`, 
+            cast(array() as array<int>), 
+            (acc,x) -> array_append(acc, coalesce(element_at(acc,-1), 0) + length(x))
+        )
+    """)
 
-    df1 = df.withColumn('x1', expr(r"""split(rtrim('\0',regexp_replace(x, '((.)\\2*)', '$1\0')),'\0')""")) \
-        .withColumn('l1', expr("""transform(x1, e -> length(e))""")) \
-        .withColumn('l2', expr(expr1))
-    df1.show(3,0)
-    +---------------+-------------------------+---------------+------------------+
-    |x              |x1                       |l1             |l2                |
-    +---------------+-------------------------+---------------+------------------+
-    |aaabbbb0000ccaa|[aaa, bbbb, 0000, cc, aa]|[3, 4, 4, 2, 2]|[3, 7, 11, 13, 15]|
-    |ttttesst       |[tttt, e, ss, t]         |[4, 1, 2, 1]   |[4, 5, 7, 8]      |
-    +---------------+-------------------------+---------------+------------------+
+    df1 = df.withColumn('x1', expr(r"""regexp_extract_all(x, r'((.)\2*)',1)""")) \
+        .withColumn('x3', running_sum('x1'))
+    df1.show(2,0)
+    +---------------+-------------------------+------------------+
+    |x              |x1                       |x3                |
+    +---------------+-------------------------+------------------+
+    |aaabbbb0000ccaa|[aaa, bbbb, 0000, cc, aa]|[3, 7, 11, 13, 15]|
+    |ttttesst       |[tttt, e, ss, t]         |[4, 5, 7, 8]      |
+    +---------------+-------------------------+------------------+
 
+   Notes: As of Spark 3.1.0, using regext_extract_all() to retrieve all matches into array, originally
+          using regexp_replace + split functions to handle the same
 
 
 (46) roll-up sum for an array field inside an StructType column
@@ -147,39 +166,37 @@ Spark SQL higher-order functions:
 
     df1 = df.selectExpr("""
   
-       struct(
-         transform(
-           _main_object.parent_array, x -> 
-             (
-               x.child_array as child_array,
-               aggregate(
-                 x.child_array, 
-                 0D, 
-                 (acc,x) -> acc+float(x.amount_set.presentment_money.amount),
-                 acc -> round(acc,2)
-               ) as sub_total_presentment_amt,
-               aggregate(
-                 x.child_array, 
-                 0D, 
-                 (acc,x) -> acc+float(x.amount_set.shop_money.amount),
-                 acc -> round(acc,2)
-               ) as sub_total_shop_amt
-             )
-         ) as _main_object,
-         aggregate(
-           /* accessing array field inside an array of structs */
-           flatten(_main_object.parent_array.child_array), 
-           0D, 
-           (acc,x) -> acc+float(x.amount_set.presentment_money.amount),
-           acc -> round(acc,2)
-         ) as rollup_total_presentment_money_amount,
-         aggregate(
-           flatten(_main_object.parent_array.child_array), 
-           0D, 
-           (acc,x) -> acc+float(x.amount_set.presentment_money.amount),
-           acc -> round(acc,2)
-
-         ) as rollup_total_shop_money_amount
+       named_struct(
+           "_main_object", transform(_main_object.parent_array, x -> 
+                   named_struct(
+                       "child_array", x.child_array,
+                       "sub_total_presentment_amt", aggregate(
+                               x.child_array, 
+                               0D,
+                               (acc,x) -> acc+float(x.amount_set.presentment_money.amount),
+                               acc -> round(acc,2)
+                           ),
+                       "sub_total_shop_amt", aggregate(
+                               x.child_array, 
+                               0D, 
+                               (acc,x) -> acc+float(x.amount_set.shop_money.amount),
+                               acc -> round(acc,2)
+                           )
+                   )
+               ),
+           "rollup_total_presentment_money_amount", aggregate(
+                   /* accessing array field inside an array of structs */
+                   flatten(_main_object.parent_array.child_array), 
+                   0D, 
+                   (acc,x) -> acc+float(x.amount_set.presentment_money.amount),
+                   acc -> round(acc,2)
+               ),
+           "rollup_total_shop_money_amount", aggregate(
+                   flatten(_main_object.parent_array.child_array), 
+                   0D, 
+                   (acc,x) -> acc+float(x.amount_set.presentment_money.amount),
+                   acc -> round(acc,2)
+               )
        ) as new_main_object
 
     """)
