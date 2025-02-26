@@ -346,57 +346,62 @@ Spark SQL higher-order functions:
       , ('12347', 'Nepal', 'China', '2020-10-19', '21') 
     ], ['container_no', 'origin', 'destination', 'shipment_dt', 'volume'])
 
-    df.createOrReplaceTempView("Input_DF")
+    df1 = spark.sql("""
 
-    spark.sql("""
-
-      WITH t1 as (
-          select container_no, 
-                 array_sort(collect_list(struct(shipment_dt, volume, origin, destination))) as dta
-          FROM Input_DF
+          SELECT container_no,
+                 array_sort(collect_list(
+                     struct(date(shipment_dt) AS shipment_dt, volume, origin, destination)
+                 )) AS dta
+          FROM {tbl}
           GROUP BY container_no
-      )
-      SELECT container_no,
+
+     """, tbl=df)
+
+     spark.sql("""
+
+     SELECT container_no,
         inline_outer(
-          aggregate(
-            /* iterate through array dta(through below `x`) from the 2nd item to the last item */
-            slice(dta,2,size(dta)),
-            /* set zero_value as array of structs array<struct<dta:struct<...>,start_dt:date>>
-             * and initialize it with dta[0] and its shipment_dt as start_dt
-             */
-            array((dta[0] as dta, dta[0].shipment_dt as start_dt)),
-            /* merge: if x.shipment_at is within 10 days of the start_at from the last item of acc,
-             * then update dta of the last item of acc and keep its original start_at
-             * otherwise, added a new item `(x as dta, x.shipment_dt as start_dt)` to acc 
-             */
-            (acc, x) -> 
-              IF(x.shipment_dt <= element_at(acc,-1).start_dt + INTERVAL 10 days,
-                 concat(
-                   slice(acc,1,size(acc)-1), 
-                   array((
-                     IF(element_at(acc,-1).dta.volume > x.volume, element_at(acc,-1).dta, x) as dta,
-                     element_at(acc,-1).start_dt as start_dt
-                   ))
-                 ),
-                 concat(acc, array((x as dta, x.shipment_dt as start_dt)))
-              ),
-            /* finish: retrieve only the dta field of acc */
-            acc -> transform(acc, x -> x.dta)
-          )
+            aggregate(
+                /* iterate through array dta(through below `x`) from the 2nd item to the last item */
+                slice(dta,2,size(dta)-1),
+                /* set zero_value as array of structs array<struct<dta:struct<...>,start_dt:date>>
+                 * and initialize it with dta[0] and its shipment_dt as start_dt
+                 */
+                array((dta[0] as dta, dta[0].shipment_dt as start_dt)),
+                /* merge: if x.shipment_at is within 10 days of the start_at from the last item of acc,
+                 * then update dta of the last item of acc and keep its original start_at
+                 * otherwise, added a new item `(x as dta, x.shipment_dt as start_dt)` to acc
+                 */
+                (acc, x) -> CASE 
+                        WHEN x.shipment_dt <= acc[0].start_dt + INTERVAL 10 days
+                            THEN array_insert(
+                                   slice(acc, 2, size(acc)-1),
+                                   1,
+                                   named_struct(
+                                       "dta", IF(acc[0].dta.volume > x.volume, acc[0].dta , x),
+                                       "start_dt", acc[0].start_dt
+                                   )
+                                )
+                        ELSE
+                            array_insert(acc, 1, (x as dta, x.shipment_dt as start_dt))
+                        END,      
+                /* finish: retrieve only the dta field of acc */
+                acc -> transform(acc, x -> x.dta)
+            )
         )
-      FROM t1
+     FROM {tbl}
+     ORDER BY container_no, shipment_dt
 
-    """).orderBy('container_no','shipment_dt').show()
-    +------------+-----------+------+------+-----------+                            
-    |container_no|shipment_dt|volume|origin|destination|
-    +------------+-----------+------+------+-----------+
-    |       12345| 2020-10-10|    30| India|      China|
-    |       12345| 2020-10-25|    20| India|      China|
-    |       12346| 2020-10-17|    50| India|      China|
-    |       12347| 2020-10-19|    21| Nepal|      China|
-    +------------+-----------+------+------+-----------+
+    """, tbl=df1).show()
 
-    
+ Notes:
+  (1) array_insert SparkSQL function is added since Spark 3.4, below are some equivalent for different Spark versions:
+      
+        array_prepend(acc, x)   <-- Spark 3.5+
+        array_insert(acc, 1, x) <-- Spark 3.4+
+        concat(array(x), acc)   <-- before Spark 3.4
 
+        Alternative:   transform(acc, (y,i) -> IF(i = 0, x, y))   <- Spark 2.4+
 
+  (2) spark.sql() method with **kwargs support requires Spark 3.3+
 
