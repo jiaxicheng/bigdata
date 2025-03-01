@@ -2,13 +2,10 @@ Continue..
 
 Spark SQL higher-order functions:
 
-(22) Count array items using transform + filter(size) or aggregate functions:
+(22) Count array items using groupby-pivot or pyspark.ml.feature.CountVectorizer:
   REF: https://stackoverflow.com/questions/60517738/alternative-to-groupby-for-pyspark-dataframe
 
   Below example
-  Method-1: using transform + filter
-  1. we use array_max to find max_value in list and generate a sequence from 0 to this max value
-  2. iterate the above list using `x` and transform it into the number of items in array `data` using(filter+size)
     
     df = spark.createDataFrame([(2,[1,2]), (2,[1,2]), (3,[1,2,3]), (3,[1,2])],['timestamp', 'vars'])
     
@@ -182,22 +179,25 @@ Spark SQL higher-order functions:
     
 
 (24) use aggregate + map_concat to merge a array of maps into a map
-  REF: https://stackoverflow.com/questions/60629812/how-to-convert-map-values-using-spark-built-in-functions/60646490#60646490
+  REF: https://stackoverflow.com/questions/60629812/
   Target: retrieve the first non-null values from a map-value in a list of StructType fields
   (a) use transform to convert an array(map_keys()) into an array of maps
   (b) use aggregate to merge array of maps into a map
 
     # example dataframe
-    df = spark.createDataFrame([({"k0": {"b": 100, "d":"ab" }, "k1": {"a": 1 },"k3": {"c": 12.5, "d":"ef" },"k4": {"d":"hh"}},)],"col1:map<string,struct<a:int,b:int,c:double,d:string>>")
+    df = spark.createDataFrame([
+            ({"k0": {"b": 100, "d":"ab" }, "k1": {"a": 1 },"k3": {"c": 12.5, "d":"ef" },"k4": {"d":"hh"}}, )
+        ], "col1:map<string,struct<a:int,b:int,c:double,d:string>>"
+    )
 
     df.selectExpr("""
-      aggregate(
-        transform(map_keys(col1), x -> map(x, coalesce(col1[x].a,col1[x].b,col1[x].c,col1[x].d))), 
-        /* zero_value: empty map */
-        map(), 
-        /* merge: use map_concat */
-        (acc,y) -> map_concat(acc, y)
-      )  as col1
+        aggregate(
+            transform(map_keys(col1), x -> map(x, coalesce(col1[x].a,col1[x].b,col1[x].c,col1[x].d))), 
+            /* zero_value: empty map */
+            map(), 
+            /* merge: use map_concat */
+            (acc,y) -> map_concat(acc, y)
+        )  as col1
     """)
 
   For Spark 3.0+, use transform_values:
