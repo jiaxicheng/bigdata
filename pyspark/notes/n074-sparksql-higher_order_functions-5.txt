@@ -15,40 +15,53 @@ Spark SQL higher-order functions:
     
   we will implement the logic in the above merge and finish expressions:
 """
-    from pyspark.sql.functions import collect_list, struct, to_date
+    from pyspark.sql.functions import collect_list, struct, to_date, expr
     from pyspark.sql import Window
    
-    df = spark.read.csv('/home/xicheng/test/groupby-3.txt', header=True, inferSchema=True)
+    df = spark.createDataFrame([
+        ('group 1', '01/12/2019', 100, 80), ('group 1', '08/12/2019', 60, 10),
+        ('group 1', '15/12/2019', 60, 10), ('group 1', '22/12/2019', 150, 200),
+        ('group 2', '15/12/2019', 80, 90), ('group 2', '22/12/2019', 150, 30),
+        ('group 3', '22/12/2019', 50, 50)
+    ], ['group', 'start_date', 'available stock', 'used_stock'])
+
+    # using aggregate function to implement the logic of calculating the end_date
+    end_date_sql_expr = """
+        aggregate(
+            /* argument */
+            slice(data, 2, size(data)-1),
+            /* zero expression, with datatype of 'struct<end_date:data,total:double>' */
+            (data[0].start_date as end_date, data[0].used_stock as total),
+            /* merge: use acc.total to save accumulated sum of used_stock */
+            (acc, x) -> CASE
+                WHEN acc.total < `available stock` THEN
+                    named_struct(
+                        "end_date", x.start_date, 
+                        "total", acc.total + x.used_stock
+                    )
+                ELSE acc
+                END,
+            /* finish */
+            acc -> IF(acc.total >= `available stock`, acc.end_date, NULL)
+        ) as end_date
+     """
 
     # set the WindowSpec from the current Row to the last Row in the same group
     w1 = Window.partitionBy('group').orderBy('start_date').rowsBetween(0, Window.unboundedFollowing)
     
     # convert the start_date to DateType, find sorted collect_list of stryct('start_date', 'used_stock')
     # use aggregate function to calculate the end_date
-    df.withColumn('start_date', to_date('start_date', 'dd/MM/yyyy')) \
-      .withColumn('data', collect_list(struct('start_date','used_stock')).over(w1)) \
-        .selectExpr(
-            "group",
-            "start_date",
-            "`available stock`",
-            "used_stock",
-            """
-              aggregate(
-                /* expr: data array containing from 2nd element to the last */
-                slice(data,2,size(data)-1),
-                /* zero expression, initialize with data[0] with datatype of 'struct<end_date:data,total:double>' */
-                (data[0].start_date as end_date, data[0].used_stock as total),
-                /* merge: use acc.total to save accumulated sum of used_stock */
-                (acc, y) ->
-                  IF(acc.total < `available stock`
-                  ,  (y.start_date as end_date, acc.total + y.used_stock as total)
-                  ,  acc
-                  ),
-                /* finish */
-                z -> IF(z.total >= `available stock`, z.end_date, NULL)
-              ) as end_date
-            """
-        ).show(truncate=False)
+    df_new = df.withColumn(
+            'start_date', 
+            to_date('start_date', 'dd/MM/yyyy')
+        ).withColumn(
+            'data', 
+            collect_list(struct('start_date', 'used_stock')).over(w1)
+        ).select(
+            *df.columns,
+            expr(end_date_sql_expr).alias("end_date")
+        )
+    df_new.show(truncate=False)
     +-------+----------+---------------+----------+----------+
     |group  |start_date|available stock|used_stock|end_date  |
     +-------+----------+---------------+----------+----------+
@@ -67,23 +80,6 @@ Spark SQL higher-order functions:
 
     from pyspark.sql.functions import collect_list, struct, to_date, col, when, expr
 
-    end_date_sql_expr = """
-        aggregate(
-          /* argument */
-          slice(data,2,size(data)-1),
-          /* zero expression, with datatype of 'struct<end_date:data,total:double>' */
-          (data[0].start_date as end_date, data[0].used_stock as total),
-          /* merge: use acc.total to save accumulated sum of used_stock */
-          (acc, y) ->
-            IF(acc.total >= `available stock`
-            ,  (acc.end_date as end_date, acc.total as total)
-            ,  (y.start_date as end_date, acc.total + y.used_stock as total)
-            ),
-          /* finish */
-          z -> IF(z.total >= `available stock`, z.end_date, NULL)
-        )
-     """
-
     # 1st scan up to the N following rows which can cover majority of end_date which satisfying the condition
     N = 1
     w2 = Window.partitionBy('group').orderBy('start_date').rowsBetween(0, N)
@@ -91,18 +87,23 @@ Spark SQL higher-order functions:
     # 2nd scan will cover the full length but only to rows with end_date is NULL
     w1 = Window.partitionBy('group').orderBy('start_date').rowsBetween(0, Window.unboundedFollowing)
 
-    df.withColumn('start_date', to_date('start_date', 'dd/MM/yyyy')) \
-        .withColumn('data', collect_list(struct('start_date','used_stock')).over(w2)) \
-        .withColumn('end_date', expr(end_date_sql_expr)) \
-        .withColumn('data',
-           when(col('end_date').isNull(), collect_list(struct('start_date','used_stock')).over(w1))) \
-        .selectExpr(
-           "group",
-           "start_date",
-           "`available stock`",
-           "used_stock",
-           "IF(end_date is NULL, {0}, end_date) AS end_date".format(end_date_sql_expr)
-        ).show(truncate=False)
+    df_new = df.withColumn(
+            'start_date', 
+            to_date('start_date', 'dd/MM/yyyy')
+        ).withColumn(
+            'data', 
+            collect_list(struct('start_date','used_stock')).over(w2)
+        ).withColumn(
+            'end_date', 
+            expr(end_date_sql_expr)
+        ).withColumn(
+            'data',
+            when(col('end_date').isNull(), collect_list(struct('start_date','used_stock')).over(w1))
+        ).select(
+           *df.columns,
+           expr("IF(end_date is NULL, {0}, end_date) AS end_date".format(end_date_sql_expr))
+        )
+    df_new.show(truncate=False)
     +-------+----------+---------------+----------+----------+                      
     |group  |start_date|available stock|used_stock|end_date_1|
     +-------+----------+---------------+----------+----------+
@@ -124,26 +125,31 @@ Spark SQL higher-order functions:
         .toDF("id")
         .withColumn("optimized_probabilities_map", typedLit(Map("foo"->0.34333337, "bar"->0.23))))
 
-    mockedDf.withColumn("optimizer_ruler_name", expr("""
+    mockedDf.withColumn(
+        "optimizer_ruler_name", 
+        expr("""
+            aggregate(
+                /* map_keys as array entry */
+                map_keys(optimized_probabilities_map), 
+                /* zero_expr: set up buffer with DataType: struct<name:string,val:double> */
+                (string(NULL) as name, double(NULL) as val),
+                /* merge: iterate through map_keys, compare the corresponding value with the buffered acc.val 
+                 * and then update acc.name accordingly
+                 */
+                (acc, x) -> CASE
+                        WHEN acc.val is NULL OR acc.val < optimized_probabilities_map[x] THEN
+                            named_struct(
+                                "name", x, 
+                                "val", optimized_probabilities_map[x]
+                            )
+                        ELSE acc
+                        END,
+                /* finish: select only name from the buffer */
+                acc -> acc.name
+            )
 
-        aggregate(
-          /* map_keys as array entry */
-          map_keys(optimized_probabilities_map), 
-          /* zero_expr: set up buffer with DataType: struct<name:string,val:double> */
-          (string(NULL) as name, double(NULL) as val),
-          /* merge: iterate through map_keys, compare the corresponding value with the buffered acc.val 
-           * and then update acc.name accordingly
-           */
-          (acc, y) ->
-            IF(acc.val is NULL OR acc.val < optimized_probabilities_map[y]
-             , (y as name, optimized_probabilities_map[y] as val)
-             , acc
-            ),
-          /* finish: select only name from the buffer */
-          acc -> acc.name
-        )
-
-    """)).show(false)
+        """)
+    ).show(false)
     +---+--------------------------------+--------------------+
     |id |optimized_probabilities_map     |optimizer_ruler_name|
     +---+--------------------------------+--------------------+
@@ -153,9 +159,11 @@ Spark SQL higher-order functions:
 
 
 (18) Use aggregate function to return a named_struct while using EMPTY array() to initialize zero_value
-  REF: https://stackoverflow.com/questions/59931770/sum-of-array-elements-depending-on-value-condition-pyspark/59938994#59938994
+  REF: https://stackoverflow.com/questions/59931770/
 
-  Note: Aggregate function using Empty array() to initialize the zero_value, do calculation based on y value and array indices:
+  Note: Aggregate function using Empty array() to initialize the zero_value(note newer version Spark need to
+        explicitly cast the data types of the array), do calculation based on x value and array indices:
+
     from pyspark.sql.functions import expr
 
     df = spark.createDataFrame([
@@ -164,35 +172,36 @@ Spark SQL higher-order functions:
         (3,None), 
         (4,[])
       ],['id','column'])
-    df.show()
-    +---+--------------------+
-    | id|              column|
-    +---+--------------------+
-    |  1|[0.2, 2.1, 3.0, 4...|
-    |  2|[7.0, 0.3, 0.3, 8...|
-    |  3|                null|
-    |  4|                  []|
-    +---+--------------------+
 
-    df.withColumn('data', expr("""
-    
-        aggregate(
-          /* ArrayType argument */
-          column,
-          /* zero: set empty array to initialize acc */
-          array(),
-          /* merge: iterate through `column` and reduce based on the values of y and the array indices of acc */
-          (acc, y) ->
-            CASE
-              WHEN y < 2.0 THEN array(IFNULL(acc[0],0) + y, acc[1], acc[2])
-              WHEN y > 2.0 THEN array(acc[0], IFNULL(acc[1],0) + y, acc[2])
-                           ELSE array(acc[0], acc[1], IFNULL(acc[2],0) + y)
-            END,
-          /* finish: to convert the array into a named_struct */
-          acc -> (acc[0] as `column<2`, acc[1] as `column>2`, acc[2] as `column=2`)
-        )
-    
-    """)).selectExpr('id', 'data.*').show()
+    df.show(4,0)
+    +---+------------------------------+
+    |id |column                        |
+    +---+------------------------------+
+    |1  |[0.2, 2.1, 3.0, 4.0, 3.0, 0.5]|
+    |2  |[7.0, 0.3, 0.3, 8.0, 2.0]     |
+    |3  |null                          |
+    |4  |[]                            |
+    +---+------------------------------+
+
+    df.withColumn(
+        "data",
+        expr("""
+            aggregate(
+                /* ArrayType argument */
+                column,
+                /* zero: set empty array to initialize acc */
+                CAST(array() AS array<double>),
+                /* merge: iterate through `column` and reduce based on the values of x and the array indices of acc */
+                (acc, x) -> CASE
+                        WHEN x < 2.0 THEN array(IFNULL(acc[0],0) + x, acc[1], acc[2])
+                        WHEN x > 2.0 THEN array(acc[0], IFNULL(acc[1],0) + x, acc[2])
+                        ELSE array(acc[0], acc[1], IFNULL(acc[2],0) + x)
+                    END,
+                /* finish: to convert the array into a named_struct */
+                acc -> (acc[0] as `column<2`, acc[1] as `column>2`, acc[2] as `column=2`)
+            )
+        """
+    ).selectExpr("id", "data.*").show()
     +---+--------+--------+--------+
     | id|column<2|column>2|column=2|
     +---+--------+--------+--------+
