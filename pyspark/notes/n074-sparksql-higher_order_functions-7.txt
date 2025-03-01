@@ -12,73 +12,32 @@ Spark SQL higher-order functions:
     
     df = spark.createDataFrame([(2,[1,2]), (2,[1,2]), (3,[1,2,3]), (3,[1,2])],['timestamp', 'vars'])
     
-    from pyspark.sql.functions import flatten, collect_list
-    
-    df.groupby('timestamp').agg(flatten(collect_list('vars')).alias('data')) \
-      .selectExpr("timestamp", "transform(sequence(0, array_max(data)), x -> size(filter(data, y -> y = x)))") \
-      .show(truncate=False)
-    +---------+------------+                                                        
-    |timestamp|vars        |
-    +---------+------------+
-    |3        |[0, 2, 2, 1]|
-    |2        |[0, 2, 2]   |
-    +---------+------------+
-    
-  Method-2: using aggregate function:
-  1. find max_value in list and set zero_value of `acc` as an Array with `max_value+1` items with all zero values
-  2. iterate through the Array `data` using `y` and reduce the array `acc` by its index `i` and value `x` based 
-     on the value of `y` using `transform(acc, (x,i) -> IF(i=y, x+1, x))`
-  see below:
-    
-    df.groupby('timestamp').agg(flatten(collect_list('vars')).alias('data')) \ 
-       .selectExpr("timestamp", """ 
-        
-         aggregate( 
-           data, 
-           /* use an array as zero_value, size = array_max(data))+1 and all values are zero */
-           array_repeat(0, int(array_max(data))+1), 
-           /* increment the ith value of the Array by 1 if i == y */
-           (acc, y) -> transform(acc, (x,i) -> IF(i=y, x+1, x)) 
-         ) as vars 
-                                      
-    """).show(truncate=False)
-    +---------+------------+                                                        
-    |timestamp|vars        |
-    +---------+------------+
-    |3        |[0, 2, 2, 1]|
-    |2        |[0, 2, 2]   |
-    +---------+------------+
-    
+  Method-1: using explode + groupby + pivot:
 
-  Method-3: using explode + groupby + count and split data into two arrays: `indices` and `values`
-    then use transform and array_position to fill in the final array:
+    from pyspark.sql.functions import array 
 
-    from pyspark.sql.functions import collect_list, struct
+    N = df.selectExpr('max(array_max(vars)) as m').first().m
 
-    df.selectExpr("timestamp", "explode(vars) as var") \
-        .groupby('timestamp','var') \
-        .count() \
-        .groupby("timestamp") \
-        .agg(collect_list(struct("var","count")).alias("data")) \
-        .selectExpr(
-            "timestamp",
-            "transform(data, x -> x.var) as indices",
-            "transform(data, x -> x.count) as values"
-        ).selectExpr(
-            "timestamp",
-            "transform(sequence(0, array_max(indices)), i -> IFNULL(values[array_position(indices,i)-1],0)) as new_vars"
-        ).show(truncate=False)
-    +---------+------------+                                                        
-    |timestamp|new_vars    |
+    df1 = (df.selectExpr("timestamp", "explode(vars) as var") 
+        .groupby('timestamp')  
+        .pivot('var', range(N+1)) 
+        .count() 
+        .fillna(0) 
+    )
+
+    df1.select("timestamp", array(df1.columns[1:]).alias('vars')).show()
     +---------+------------+
-    |3        |[0, 2, 2, 1]|
-    |2        |[0, 2, 2]   |
+    |timestamp|        vars|
+    +---------+------------+
+    |        3|[0, 2, 2, 1]|
+    |        2|[0, 2, 2, 0]|
     +---------+------------+
 
 
-  Method-4 using pyspark.ml.feature.CountVectorizer
+  Method-2: using pyspark.ml.feature.CountVectorizer
 
     from pyspark.ml.feature import CountVectorizerModel
+    from pyspark.ml.functions import vector_to_array
     from pyspark.sql.functions import collect_list, flatten
 
     # find max N of array vars from all rows 
@@ -93,18 +52,18 @@ Spark SQL higher-order functions:
         .agg(flatten(collect_list("vars")).alias("vars"))
 
     # use the model to create the resulting SparseVector, then convert it into ArrayType column (udf)
-    model.transform(df1).withColumn("new_vars", to_array("vec_vars")).show(truncate=False)                             
-    +---------+---------------+-------------------------+--------------------+      
-    |timestamp|vars           |vec_vars                 |new_vars            |
-    +---------+---------------+-------------------------+--------------------+
-    |3        |[1, 2, 3, 1, 2]|(4,[1,2,3],[2.0,2.0,1.0])|[0.0, 2.0, 2.0, 1.0]|
-    |2        |[1, 2, 1, 2]   |(4,[1,2],[2.0,2.0])      |[0.0, 2.0, 2.0, 0.0]|
-    +---------+---------------+-------------------------+--------------------+
-   
+    model.transform(df1).withColumn("new_vars", vector_to_array("vec_vars").astype('array<int>')).show(truncate=False) 
+    +---------+---------------+-------------------------+------------+
+    |timestamp|vars           |vec_vars                 |new_vars    |
+    +---------+---------------+-------------------------+------------+
+    |3        |[1, 2, 3, 1, 2]|(4,[1,2,3],[2.0,2.0,1.0])|[0, 2, 2, 1]|
+    |2        |[1, 2, 1, 2]   |(4,[1,2],[2.0,2.0])      |[0, 2, 2, 0]|
+    +---------+---------------+-------------------------+------------+
+
 
 
 (23) Use transform to split a Array list into chunk and take the sum of each chunk for a new list:
-    REF:https://stackoverflow.com/questions/60537729/how-to-split-an-array-into-chunks-and-find-the-sum-of-the-chunks-and-store-the-o
+    REF:https://stackoverflow.com/questions/60537729/
 
     from pyspark.sql.functions import expr
 
@@ -115,24 +74,25 @@ Spark SQL higher-order functions:
 
     N = 3
 
-    sql_expr = """
+    split_by = lambda x: expr(f"""
         transform(
-          /* create a sequence from 0 to number_of_chunks-1 */
-          sequence(0,ceil(size(finalArray)/{0})-1),
-          /* iterate the above sequence */
-          i ->
-            /* create a sequence from 0 to chunk_size-1
+            /* create a sequence from 0 to `size(finalArray)-1` step with {N} */
+            sequence(0,size(finalArray)-1,{x}),
+            /* iterate the above sequence */
+            i ->
+            /* create a sequence from i to i+chunk_size-1
                calculate the sum of values containing every chunk_size items
             */
             aggregate(
-              sequence(0,{0}-1),
-              0L,
-              (acc, y) -> acc + ifnull(finalArray[i*{0}+y],0)
+                sequence(i,i+{x-1}),
+                0L,
+                (acc, y) -> acc + ifnull(finalArray[y],0)
             )
         )
-    """
+    """)
+ 
 
-    df.withColumn('new_vars', expr(sql_expr.format(N))).show(truncate=False)                                           
+    df.withColumn('new_vars', split_by(N)).show(truncate=False)                                           
     +-----+------------------------+---------+
     |Index|finalArray              |new_vars |
     +-----+------------------------+---------+
@@ -140,31 +100,6 @@ Spark SQL higher-order functions:
     |2    |[0, 4, 4, 3, 4, 2, 2, 5]|[8, 9, 7]|
     +-----+------------------------+---------+
 
-  Note: to handle decimal, will need to force the data type to the merge part of the aggregate function:
-
-     sql_expr = """ 
-         transform( 
-           /* create a sequence from 0 to number_of_chunks-1 */ 
-           sequence(0,ceil(size(finalArray)/{0})-1), i -> 
-             aggregate( 
-               sequence(0,{0}-1), 
-               /* aggregate to a decimal(12,2) */
-               cast(0 as decimal(12,2)), 
-               /* force the resulting acc to decimal(12,2) 
-                * otherwise it yields the `data type mismatch` ERROR
-                */
-               (acc, y) -> cast(acc + ifnull(finalArray[i*{0}+y],0) as decimal(12,2)) 
-             ) 
-         ) 
-       """
-    df.withColumn('new_vars', expr(sql_expr.format(N))).show(truncate=False)                                           
-    +-----+------------------------+------------------+
-    |Index|finalArray              |new_vars          |
-    +-----+------------------------+------------------+
-    |1    |[0, 2, 0, 3, 1, 4, 2, 7]|[2.00, 8.00, 9.00]|
-    |2    |[0, 4, 4, 3, 4, 2, 2, 5]|[8.00, 9.00, 7.00]|
-    +-----+------------------------+------------------+
-    #DataFrame[Index: bigint, finalArray: array<bigint>, new_vars: array<decimal(12,2)>]
 
  Example-23-2:
   REF:https://stackoverflow.com/q/64873861/9510729
@@ -185,51 +120,58 @@ Spark SQL higher-order functions:
     rdd = sc.parallelize([j1])
     
     df = spark.read.json(rdd, schema="name string, p_name string, usage_count map<string,int>, usage_min map<string,float>")
-    
-    df = spark.createDataFrame([(j1,)],['e_data'])
-    
-    schema = "name string, p_name string, usage_count map<string,int>, usage_min map<string,float>"
-    
-    df0 = df.withColumn("e_data", F.from_json("e_data", schema)).select("*", "e_data.*").drop("e_data")
     +----+------+--------------------+--------------------+
     |name|p_name|         usage_count|           usage_min|
     +----+------+--------------------+--------------------+
     |abc1| abc_1|[bin102 -> 1, bin...|[bin102 -> 7.7, b...|
     +----+------+--------------------+--------------------+
     
-    # merge usage_count and usage_min into a single map, remove `bin` from keys
-    df1 = df0.withColumn("map1", F.expr("""
-        map_from_entries(
-          transform(map_keys(usage_count), k -> 
-            struct(int(substr(k,4)), named_struct('count', usage_count[k], 'min', usage_min[k]))
-          )
+    # use map_zip_with to merge usage_count and usage_min into a single map, 
+    # use transform_keys to remove `bin` from keys
+
+    df1 = df.withColumn("map1", F.expr("""
+        transform_keys(
+            map_zip_with(usage_count, usage_min, (k,v1,v2) -> (ifnull(v1,0) AS count, ifnull(v2,0) AS min)),
+            (k,v) -> smallint(trim(LEADING 'bin0' FROM k))
         )
     """))
+
     df1.show(1,80,vertical=True)
     -RECORD 0---------------------------------------------------------------------------------------
      name        | abc1                                                                             
      p_name      | abc_1                                                                            
-     usage_count | [bin102 -> 1, bin103 -> 1, bin104 -> 1, bin105 -> 1, bin110 -> 1, bin112 -> 1... 
-     usage_min   | [bin102 -> 7.7, bin103 -> 10.0, bin104 -> 10.0, bin105 -> 2.5, bin110 -> 0.1,... 
-     map1        | [102 -> [1, 7.7], 103 -> [1, 10.0], 104 -> [1, 10.0], 105 -> [1, 2.5], 110 ->...
-    
-    # iterating through 0-23 and split the bins into 6 elements each and use aggregate to sum the count/minute
-    df2 = df1.withColumn("usage", F.expr("""
-        transform(sequence(0,23), i ->
-          aggregate(
-            sequence(i*6,(i+1)*6-1), 
-            (0L as count, 0D as min),
-            (acc, x) -> named_struct(
-               'count', acc.count + ifnull(map1[x].count,0),
-               'min', acc.min + ifnull(map1[x].min,0.0)
-            ),
-            acc -> (acc.count as count, round(acc.min,1) as min)
-          )
-        )
-    """))
+     usage_count | {bin102 -> 1, bin103 -> 1, bin104 -> 1, bin105 -> 1, bin110 -> 1, bin112 -> 1... 
+     usage_min   | {bin102 -> 7.7, bin103 -> 10.0, bin104 -> 10.0, bin105 -> 2.5, bin110 -> 0.1,... 
+     map1        | {102 -> {1, 7.7}, 103 -> {1, 10.0}, 104 -> {1, 10.0}, 105 -> {1, 2.5}, 110 ->... 
+
+    # iterating through 0-143 with step=6 and split the bins into 6 elements each 
+    # and use aggregate to sum the count/minute
+    N = 6
+    df2 = df1.selectExpr(
+        "name", 
+        "p_name",
+        f"""
+            transform(sequence(0,143,{N}), i ->
+                aggregate(
+                    sequence(i, i+{N-1}), 
+                    (0 AS count, 0D AS min),
+                    (acc, x) -> named_struct(
+                            'count', acc.count + ifnull(map1[x].count,0),
+                            'min', acc.min + ifnull(map1[x].min,0.0)
+                        ),
+                    acc -> (acc.count AS count, round(acc.min,1) AS min)
+                )
+            ) AS usage
+        """
+    )
     
     # format the output count and min
-    df_new = df2.selectExpr("name","p_name","array_join(usage.count, ',') as count", "array_join(usage.min, ',') as min")
+    df_new = df2.selectExpr(
+        "name",
+        "p_name",
+        "array_join(usage.count, ',') AS count", 
+        "array_join(usage.min, ',') AS min"
+    )
     
     df_new.show(1,0,vertical=True)
     #-RECORD 0-----------------------------------------------------------------------------------------------------
