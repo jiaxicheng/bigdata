@@ -3,33 +3,37 @@ Continue..
 Spark SQL higher-order functions:
 
 (19) using aggregate to calculate stateful values from the previous rows
-  REF: https://stackoverflow.com/questions/60109004/can-we-dynamically-retrieve-previous-rows-value-of-a-updating-column-in-pyspark
+  REF: https://stackoverflow.com/questions/60109004/
   Using the same method shown in https://github.com/jiaxicheng/bigdata/blob/master/pyspark/notes/n053-window_with_gaps_using_aggregate-2-array.txt
 
     from pyspark.sql.functions import array_sort, collect_list, struct
 
-    df = spark.createDataFrame([(1,5),(3,6),(7,10),(13,17), (15,20)],['START', 'END'])
+    df = spark.createDataFrame([(1,5),(3,6),(7,10),(13,17), (15,20)], ['START', 'END'])
 
-    df.agg(array_sort(collect_list(struct('START', 'END'))).alias('data'))\
-      .selectExpr("""
-        inline_outer(
-          aggregate(
-            /* iterate through array data from the 2nd element to the last */
-            slice(data,2,size(data)-1),
-            /* start: zero value as array containg a single element data[0] */
-            array(data[0]),
-            /* iterate through data[1:] and append it to acc array based on the end of last element of acc array */
-            (acc, y) -> 
-              concat(acc, 
-                IF(element_at(acc, -1).end > y.start,
-                  array((element_at(acc, -1).end as start, element_at(acc, -1).end + y.END - y.START as end)),
-                  array(y)
+    df.agg(array_sort(collect_list(struct('START', 'END'))).alias('dta'))\
+        .selectExpr("""
+            inline_outer(
+                aggregate(
+                /* iterate through array `dta` from the 2nd element to the last */
+                slice(dta, 2, size(dta)-1),
+                /* start: zero value as array containg a single element dta[0] */
+                array(dta[0]),
+                /* iterate through dta[1:] and append it to acc array based on the end of last element of acc array */
+                (acc, y) -> 
+                    array_append(
+                        acc, 
+                        CASE WHEN element_at(acc, -1).end > y.start THEN
+                            named_struct(
+                                "start", element_at(acc, -1).end, 
+                                "end", element_at(acc, -1).end + y.END - y.START
+                            )
+                        ELSE y
+                        END
+                    )
                 )
-              )
-          )
-        )
-        
-      """).show()
+            )
+        """
+    ).show()
     +-----+---+
     |start|end|
     +-----+---+
@@ -45,14 +49,14 @@ Spark SQL higher-order functions:
 (20) array_distinct + transform + filter + size: CountVectorizer row-wise
   REF: https://stackoverflow.com/questions/60119554/string-indexer-countvectorizer-pyspark-on-single-row
   ---
-    (1) find vacubulary using array_distinct (merge two arrays with concat)
+    (1) find vacubulary using array_union (this will deduplicate the resulting array)
     (2) use transform to iterate through this vacubulary and use filter+size to count each item
 
     from pyspark.sql.functions import expr
 
     df = spark.createDataFrame([(["a", "b" ,"b", "c"], ["a","b", "x", "y"])],['column1', 'column2'])
 
-    df.withColumn('vocabulary', expr('array_distinct(concat(column1,column2))')) \
+    df.withColumn('vocabulary', expr('array_union(column1, column2)')) \
       .withColumn('a1', expr("transform(vocabulary, x -> size(filter(column1, y -> y = x)))")) \
       .withColumn('a2', expr("transform(vocabulary, x -> size(filter(column2, y -> y = x)))")) \
       .show()
@@ -61,6 +65,32 @@ Spark SQL higher-order functions:
     +------------+------------+---------------+---------------+---------------+
     |[a, b, b, c]|[a, b, x, y]|[a, b, c, x, y]|[1, 2, 1, 0, 0]|[1, 1, 0, 1, 1]|
     +------------+------------+---------------+---------------+---------------+
+
+    Method-2: create Map to count column1, column2 separately and then do transform once with the vocabulary
+        this will be more efficient if the array size are big and distinct values for each array are limited
+        as MapType are always expensive(so avoid big Map whenever possible)
+
+    df.withColumn(
+        'vocabulary',
+        expr('array_union(column1, column2)')
+    ).withColumn(
+        "map1", 
+        expr("""
+            aggregate(
+                column1,
+                CAST(map() AS map<string,int>),
+                (acc, x) -> map_zip_with(acc, map(x,1), (k,v1,v2) -> ifnull(v1,0) + ifnull(v2,0))
+            )
+        """)
+    ).withColumn(
+        "a1",
+        expr("transform(vocabulary, x -> ifnull(map1[x], 0))")
+    ).show()
+    +------------+------------+---------------+------------------------+---------------+
+    |column1     |column2     |vocabulary     |map1                    |a1             |
+    +------------+------------+---------------+------------------------+---------------+
+    |[a, b, b, c]|[a, b, x, y]|[a, b, c, x, y]|{a -> 1, b -> 2, c -> 1}|[1, 2, 1, 0, 0]|
+    +------------+------------+---------------+------------------------+---------------+
 
 
 
@@ -76,22 +106,27 @@ Spark SQL higher-order functions:
   Python Code:
 
     from pyspark.sql import Window
-    from pyspark.sql.functions import collect_list, flatten
+    from pyspark.sql.functions import collect_list, flatten, lit
 
-    df = spark.createDataFrame([(2,[1,2,3]), (2,[1,2,4]), (3,[1,2]), (4,[1,3]), (5,[1,3])],['timestamp', 'vars'])
+    df = spark.createDataFrame([(1,[1,2,3]), (2,[1,2,4]), (3,[1,2]), (4,[1,3]), (5,[1,3])],['timestamp', 'vars'])
 
-    w1 = Window.partitionBy().orderBy('timestamp')
+    w1 = Window.partitionBy(lit(1)).orderBy('timestamp')
 
-    df.withColumn("all_vals", flatten(collect_list("vars").over(w1))) \
-      .selectExpr("timestamp", """
-        aggregate(
-          transform(
-            array_distinct(all_vals), x -> map(x, size(filter(all_vals, y -> y = x)))
-          ), 
-          map(), 
-          (acc, y) -> map_concat(acc, y)
-        ) as new_vars
-    """).show(truncate=False) 
+    df.withColumn(
+        "all_vals", 
+        flatten(collect_list("vars").over(w1))
+    ).selectExpr(
+        "timestamp", 
+        """
+            aggregate(
+                transform(
+                    array_distinct(all_vals), x -> map(x, size(filter(all_vals, y -> y = x)))
+                ), 
+                CAST(map() as map<string,string>),
+                (acc, y) -> map_concat(acc, y)
+            ) as new_vars
+        """
+    ).show(truncate=False) 
     +---------+--------------------------------+
     |timestamp|new_vars                        |
     +---------+--------------------------------+
@@ -102,53 +137,31 @@ Spark SQL higher-order functions:
     |5        |[1 -> 5, 2 -> 3, 3 -> 3, 4 -> 1]|
     +---------+--------------------------------+
 
-  Method-2: using map_from_arrays:
 
-    from pyspark.sql.functions import collect_list, flatten, array_distinct, expr
-
-    df.withColumn("all_vals", flatten(collect_list("vars").over(w1))) \
-      .withColumn("all_keys", array_distinct("all_vals")) \
-      .withColumn("all_values", expr("transform(all_keys, x -> size(filter(all_vals, y -> y = x)))")) \
-      .selectExpr("timestamp", "map_from_arrays(all_keys, all_values) as new_vals") \
-      .show(truncate=False)
-    +---------+--------------------------------+
-    |timestamp|new_vals                        |
-    +---------+--------------------------------+
-    |1        |[1 -> 1, 2 -> 1, 3 -> 1]        |
-    |2        |[1 -> 2, 2 -> 2, 3 -> 1, 4 -> 1]|
-    |3        |[1 -> 3, 2 -> 3, 3 -> 1, 4 -> 1]|
-    |4        |[1 -> 4, 2 -> 3, 3 -> 2, 4 -> 1]|
-    |5        |[1 -> 5, 2 -> 3, 3 -> 3, 4 -> 1]|
-    +---------+--------------------------------+
-
-  Method-3: With Spark 3.0+, use aggregate + transform_values:
+  Method-2: With Spark 3.0+, use aggregate + map_zip_with:
 
     from pyspark.sql.functions import collect_list, flatten
 
-    df.withColumn("all_vals", flatten(collect_list("vars").over(w1))) \
-      .selectExpr("timestamp", """
-        aggregate(
-          all_vals, 
-          /* EMPTY map as zero values */
-          map(), 
-          /* merge: if y not in acc, add map(y,1), else adjust acc[y] += 1 using transform_values */
-          (acc, y) -> 
-            IF(acc[y] is NULL
-             , map_concat(acc, map(y,1))
-             , transform_values(acc, (k,v) -> int(IF(k=y,v+1,v)))
-            )
-        ) as new_vals 
-    """).show(truncate=False)
-    +---------+--------------------------------+
-    |timestamp|new_vals                        |
-    +---------+--------------------------------+
-    |1        |[1 -> 1, 2 -> 1, 3 -> 1]        |
-    |2        |[1 -> 2, 2 -> 2, 3 -> 1, 4 -> 1]|
-    |3        |[1 -> 3, 2 -> 3, 3 -> 1, 4 -> 1]|
-    |4        |[1 -> 4, 2 -> 3, 3 -> 2, 4 -> 1]|
-    |5        |[1 -> 5, 2 -> 3, 3 -> 3, 4 -> 1]|
-    +---------+--------------------------------+
-
-
-
+    df.withColumn(
+        "all_vals",
+        flatten(collect_list("vars").over(w1))
+    ).selectExpr(
+        "*",
+        """ 
+            aggregate(
+                all_vals,
+                CAST(map() as map<string,int>),
+                (acc, y) -> map_zip_with(acc,map(y,1), (k,v1,v2) -> ifnull(v1,0) + ifnull(v2,0))
+            ) as new_vars
+        """
+    ).show(truncate=False)
+    +---------+---------+------------------------------------+--------------------------------+ 
+    |timestamp|vars     |all_vals                            |new_vars                        |
+    +---------+---------+------------------------------------+--------------------------------+
+    |1        |[1, 2, 3]|[1, 2, 3]                           |{1 -> 1, 2 -> 1, 3 -> 1}        |
+    |2        |[1, 2, 4]|[1, 2, 3, 1, 2, 4]                  |{1 -> 2, 2 -> 2, 3 -> 1, 4 -> 1}|
+    |3        |[1, 2]   |[1, 2, 3, 1, 2, 4, 1, 2]            |{1 -> 3, 2 -> 3, 3 -> 1, 4 -> 1}|
+    |4        |[1, 3]   |[1, 2, 3, 1, 2, 4, 1, 2, 1, 3]      |{1 -> 4, 2 -> 3, 3 -> 2, 4 -> 1}|
+    |5        |[1, 3]   |[1, 2, 3, 1, 2, 4, 1, 2, 1, 3, 1, 3]|{1 -> 5, 2 -> 3, 3 -> 3, 4 -> 1}|
+    +---------+---------+------------------------------------+--------------------------------+
 
